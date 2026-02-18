@@ -47,6 +47,9 @@ const CONFIG = {
   JOB_SECURITY: 0.97, // quase impossível seres despedido (fase inicial)
   POS_DISTRIBUTION: { GK: 2, DEF: 6, MID: 6, ATT: 6 },
   MARKET_REFRESH_INTERVAL: 5,
+  // AI Rebuild Mode (bottom 3 each season)
+  REBUILD_BUDGET_INJECTION: 8_000_000,
+  REBUILD_PROSPECTS_COUNT: 1,
 };
 
 /** === CLUB LIST (Season 1) === **/
@@ -130,6 +133,13 @@ function calcPlayerWage(overall,age) {
   return Math.round(base * ageFactor);
 }
 
+/** === PLAYER PERSONALITIES === **/
+const PLAYER_PERSONALITIES = ["professional", "injuryProne", "bigGamePlayer", "choker", "mercenary", "loyal", "ambitious"];
+function getPersonalityDisplayName(p) {
+  const map = { professional: "Professional", injuryProne: "Injury Prone", bigGamePlayer: "Big Game Player", choker: "Choker", mercenary: "Mercenary", loyal: "Loyal", ambitious: "Ambitious" };
+  return map[p] || "Professional";
+}
+
 /** === PLAYER GENERATION === **/
 const FIRST_NAMES = ["Leo", "Alex", "Ney", "Noah", "Kai", "Hugo", "Enzo", "Bruno", "Omar", "Dany", "Dave", "Puto", "Bola", "Lamine", "Nico", "Nathan", "Jacob", "Aaron", "Theo", "Dominic", "Kai",
     "Max", "Malik", "Karim", "Isaac"];
@@ -179,7 +189,10 @@ function generatePlayer(position, clubRating, role = "normal") {
   const morale = randInt(55, 85);
   const form = randInt(45, 80);
   const stamina = randInt(70, 100);
-  const contractYears = randInt(3,5);
+  const contractYears = randInt(3, 5);
+  const personality = PLAYER_PERSONALITIES[randInt(0, PLAYER_PERSONALITIES.length - 1)];
+  const baseWage = calcPlayerWage(overall, age);
+  const wage = (personality === "mercenary") ? Math.round(baseWage * 1.2) : baseWage;
 
   return {
     id: uid("p"),
@@ -189,7 +202,7 @@ function generatePlayer(position, clubRating, role = "normal") {
     overall,
     potential,
     value: calcPlayerValue(overall, age),
-    wage: calcPlayerWage(overall, age),
+    wage,
     morale,
     form,
     stamina,
@@ -197,7 +210,8 @@ function generatePlayer(position, clubRating, role = "normal") {
     nationality: nationality.name,
     flag: nationality.code,
     goals: 0,
-    contractYears: randInt(3,5),
+    contractYears,
+    personality,
     redCard: false,
     suspendedMatches: 0,
     yellowCards: 0,
@@ -251,6 +265,14 @@ function initialTierFromRating(rating) {
   if (rating >= 81) return "Competitive";
   if (rating >= 78) return "Mid";
   return "Underdog";
+}
+
+/** Tier ladder for AI Rebuild (bottom 3 get tier-above tactics). */
+const TIER_ORDER = ["Underdog", "Mid", "Competitive", "Strong", "Elite"];
+function getTierAbove(tier) {
+  const idx = TIER_ORDER.indexOf(tier);
+  if (idx === -1 || idx === TIER_ORDER.length - 1) return null;
+  return TIER_ORDER[idx + 1];
 }
 
 // ==============================
@@ -319,6 +341,11 @@ function generateInitialBudget(rating) {
     return randInt(20, 55) * 1_000_000;
 }
 
+/** Season-start budget: 75% of tier amount (no carry-over from last season). */
+function getSeasonStartBudget(rating) {
+  return Math.round(generateInitialBudget(rating) * 0.75);
+}
+
 /** === WORLD INIT === **/
 function initWorld() {
   const clubs = CLUB_PRESETS.map((c) => {
@@ -328,8 +355,10 @@ function initWorld() {
       rating: c.rating,
       tier: initialTierFromRating(c.rating),
       reputation: c.rating,          // placeholder (same as rating)
-      budget: generateInitialBudget(c.rating),   // placeholder (vamos calibrar depois)
+      budget: getSeasonStartBudget(c.rating),
       lastSeasonPosition: null,
+      consecutiveGoodSeasons: 0,
+      consecutiveBadSeasons: 0,
       squad: [],
       momentum: 0,
       tactics: {
@@ -368,6 +397,8 @@ function initWorld() {
     league: null, // later
     cup: null,    // later
     trophies: {},
+    lastLeagueChampionId: null,
+    dominantClubId: null,
     meta: {
       dominantStyle: null,
       dominanceCounter: 0,
@@ -539,7 +570,9 @@ function avgTeamForm(club) {
 
 function clampFormUpdate(club, delta) {
   club.squad.forEach(p => {
-    p.form = clamp(p.form + delta, 20, 95);
+    let d = delta;
+    if (delta < 0 && (p.personality || "professional") === "professional") d = delta * 0.8;
+    p.form = clamp(p.form + d, 20, 95);
   });
 }
 
@@ -552,7 +585,23 @@ function applyStreakBonus(standing) {
 }
 
 
-function simulateMatch(homeClub, awayClub) {
+/** Match context for personality effects: cupRound (Semi Finals/Final), league matchday. */
+function personalityMatchModifier(player, matchContext) {
+  if (!matchContext) return 0;
+  const ctx = matchContext;
+  const cupBigGame = ctx.cupRound === "Semi Finals" || ctx.cupRound === "Final";
+  const decisiveMatchday = ctx.leagueMatchday === ctx.totalLeagueMatchdays && ctx.totalLeagueMatchdays === 34;
+  const isBigGameForBGP = cupBigGame || (decisiveMatchday && (player.personality || "") === "bigGamePlayer");
+  const isBigGame = cupBigGame; // Choker only in cup semi/final
+
+  const p = player.personality || "professional";
+  if (p === "bigGamePlayer" && isBigGameForBGP) return 3;
+  if (p === "choker" && isBigGame && (player.morale || 70) < 60) return -3;
+  if (p === "professional" && cupBigGame) return 1;
+  return 0;
+}
+
+function simulateMatch(homeClub, awayClub, matchContext) {
   const homeForm = avgTeamForm(homeClub);
   const awayForm = avgTeamForm(awayClub);
 
@@ -561,8 +610,9 @@ function simulateMatch(homeClub, awayClub) {
 
   const calcSectorOVR = (club, XI) => {
     const total = XI.reduce((acc, p) => {
-        const boost = club.cheatBoost?.[p.position] || 0;
-        return acc + (p.overall + boost);
+      const boost = club.cheatBoost?.[p.position] || 0;
+      const mod = personalityMatchModifier(p, matchContext);
+      return acc + (p.overall + boost + mod);
     }, 0);
     return total / XI.length;
   };
@@ -666,22 +716,21 @@ function simulateMatch(homeClub, awayClub) {
 
   function applyMatchInjuries(club) {
   const XI = club.squad.filter(p => p.isStarter && !p.injured);
-
-  // 🔥 Only allow MAX 1 injury per team per match
   let injuryOccurred = false;
 
   XI.forEach(player => {
     if (injuryOccurred) return;
 
-    // Base injury chance MUCH lower
-    let risk = 0.002; // was 0.02 (2%) → now 0.8%
-
-    // Aggressive tackling small boost
+    let risk = 0.002;
     if (club.tactics.tackling === "aggressive") risk += 0.006;
+    if ((player.personality || "") === "injuryProne") risk *= 1.3;
 
     if (Math.random() < risk) {
       player.injured = true;
-      player.injuryWeeks = randInt(1, 3);
+      const p = player.personality || "";
+      if (p === "professional") player.injuryWeeks = 1;
+      else if (p === "injuryProne") player.injuryWeeks = 3;
+      else player.injuryWeeks = randInt(1, 3);
       injuryOccurred = true;
 
       if (club.id === UL.game.selectedClubId) {
@@ -712,6 +761,10 @@ function simulateMatch(homeClub, awayClub) {
 }
 
 function applyMetaInfluence(club, strength) {
+  // Anti-dominance: light penalty only for back-to-back league champion
+  if (UL.game.dominantClubId === club.id) {
+    return strength * 0.97;
+  }
 
   const meta = UL.game.meta;
   if (!meta || meta.dominanceCounter < 3) return strength;
@@ -760,6 +813,13 @@ function applyTacticsToMatchStrength(homeClub, awayClub, baseHomeStrength, baseA
 
   let homeStrength = baseHomeStrength + homeBonus + ht.strength + homeStaminaPenalty;
   let awayStrength = baseAwayStrength + awayBonus + at.strength + awayStaminaPenalty;
+
+  // Anti-dominance: opponents raise their game vs back-to-back champion
+  const dominantId = UL.game.dominantClubId;
+  if (dominantId) {
+    if (homeClub.id === dominantId) awayStrength += 0.6;
+    if (awayClub.id === dominantId) homeStrength += 0.6;
+  }
 
   homeStrength = applyMetaInfluence(homeClub, homeStrength);
   awayStrength = applyMetaInfluence(awayClub, awayStrength);
@@ -842,6 +902,34 @@ function applyFormChanges(homeClub, awayClub, homeStanding, awayStanding, hg, ag
   clampFormUpdate(awayClub, deltaAway);
 }
 
+function applyPersonalityMoraleUpdates(homeClub, awayClub, homeStanding, awayStanding, hg, ag, standings) {
+  const sorted = [...standings].sort((a, b) => {
+    if (b.points !== a.points) return b.points - a.points;
+    const gdA = a.goalsFor - a.goalsAgainst, gdB = b.goalsFor - b.goalsAgainst;
+    if (gdB !== gdA) return gdB - gdA;
+    return b.goalsFor - a.goalsFor;
+  });
+  const getPosition = (clubId) => sorted.findIndex(s => s.clubId === clubId) + 1;
+
+  const applyToClub = (club, standing, won) => {
+    club.squad.forEach(p => {
+      const pers = p.personality || "";
+      if (pers === "loyal") {
+        if (won) p.morale = clamp((p.morale || 70) + 3, 40, 95);
+        if (standing.streak.slice(-3).join("") === "WWW") p.stamina = clamp((p.stamina || 80) + 5, 50, 100);
+      }
+      if (pers === "ambitious") {
+        const pos = getPosition(club.id);
+        if (pos <= 8) p.morale = clamp((p.morale || 70) + 2, 40, 95);
+        else p.morale = clamp((p.morale || 70) - 2, 40, 95);
+      }
+    });
+  };
+
+  applyToClub(homeClub, homeStanding, hg > ag);
+  applyToClub(awayClub, awayStanding, ag > hg);
+}
+
 function initLeague() {
   UL.game.league = {
     fixtures: generateFixtures(UL.game.clubs.map(c => c.id)),
@@ -866,8 +954,8 @@ function simulateCurrentMatchday() {
   const results = matchday.map(m => {
     const homeClub = getClubById(m.homeId);
     const awayClub = getClubById(m.awayId);
-
-    const sim = simulateMatch(homeClub, awayClub);
+    const matchContext = { cupRound: null, leagueMatchday: L.currentMatchday, totalLeagueMatchdays: L.fixtures.length };
+    const sim = simulateMatch(homeClub, awayClub, matchContext);
 
     // update standings
     const { home: homeStanding, away: awayStanding } =
@@ -875,6 +963,7 @@ function simulateCurrentMatchday() {
 
     // update form
     applyFormChanges(homeClub, awayClub, homeStanding, awayStanding, sim.homeGoals, sim.awayGoals);
+    applyPersonalityMoraleUpdates(homeClub, awayClub, homeStanding, awayStanding, sim.homeGoals, sim.awayGoals, L.standings);
 
     // Realistic match revenue
     const tierMultiplier = {
@@ -1051,6 +1140,7 @@ document.addEventListener("DOMContentLoaded", () => {
       applyWeeklyWages();
       decrementSuspensions();
       decrementInjuries();
+      applyMercenaryMorale();
 
       // 🔄 Transfer Market Refresh
       if (L.currentMatchday % CONFIG.MARKET_REFRESH_INTERVAL === 0) {
@@ -1109,6 +1199,16 @@ function decrementInjuries() {
             showNotification(`💪 ${player.name} recovered from injury`);
           }
         }
+      }
+    });
+  });
+}
+
+function applyMercenaryMorale() {
+  UL.game.clubs.forEach(club => {
+    club.squad.forEach(player => {
+      if ((player.personality || "") === "mercenary" && (player.contractYears || 0) <= 1) {
+        player.morale = clamp((player.morale || 70) - 5, 40, 95);
       }
     });
   });
@@ -1472,8 +1572,8 @@ function simulateCupRound() {
 
     const home = getClubById(m.homeId);
     const away = getClubById(m.awayId);
-
-    const sim = simulateMatch(home, away);
+    const matchContext = { cupRound: cup.round, leagueMatchday: 0, totalLeagueMatchdays: 34 };
+    const sim = simulateMatch(home, away, matchContext);
 
     let hg = sim.homeGoals;
     let ag = sim.awayGoals;
@@ -1546,19 +1646,40 @@ function advanceCupRound(winners) {
   generateCupMatches();
 }
 
-function endSeason() {
+/** AI Rebuild Mode: bottom 3 (positions 16–18) get budget, 1 youth swap, and tier-above tactics next season. */
+function applyAIRebuildMode(finalTable) {
+  const bottom3 = finalTable.slice(-3);
+  const myId = UL.game.selectedClubId;
 
-  const L = UL.game.league;
+  bottom3.forEach((row) => {
+    const club = getClubById(row.clubId);
+    if (!club || club.id === myId) return;
+
+    // Budget injection
+    club.budget += CONFIG.REBUILD_BUDGET_INJECTION;
+
+    // Slight squad rejuvenation: replace one player with one prospect (keep squad size)
+    const n = CONFIG.REBUILD_PROSPECTS_COUNT || 1;
+    for (let i = 0; i < n && club.squad.length >= 2; i++) {
+      const victim = [...club.squad]
+        .sort((a, b) => a.overall - b.overall || b.age - a.age)[0];
+      const pos = victim.position;
+      const idx = club.squad.indexOf(victim);
+      club.squad.splice(idx, 1);
+      club.squad.push(generatePlayer(pos, club.rating, "prospect"));
+    }
+
+    // Tactical reset: use tier above next season (stored for tactics loop)
+    const tierAbove = getTierAbove(club.tier);
+    club._rebuildTacticsTierAbove = tierAbove;
+
+    showNotification(`${club.name} received a Rebuild boost after finishing in the bottom 3.`);
+  });
+}
+
+/** Soft power drift: one source of truth for rating, momentum, streaks, tier. */
+function applySeasonRatingAndPowerDrift(finalTable) {
   const clubs = UL.game.clubs;
-
-  UL.game.lastSeasonSummary = {
-    finalTable: [...L.standings].sort((a,b)=>b.points-a.points),
-    ratingChanges: []
-  };
-
-  // ===== FINAL TABLE =====
-  const finalTable = [...L.standings]
-    .sort((a, b) => b.points - a.points);
 
   finalTable.forEach((row, index) => {
     const club = getClubById(row.clubId);
@@ -1569,9 +1690,7 @@ function endSeason() {
     // Champion
     if (position === 1) {
       ratingChange += 1;
-      club.momentum += 3;
-
-      //🏆 add league trophy
+      club.momentum = (club.momentum || 0) + 3;
       UL.game.trophies[club.id] = (UL.game.trophies[club.id] || 0) + 1;
     }
 
@@ -1590,25 +1709,74 @@ function endSeason() {
       if (randInt(0, 1) === 1) ratingChange -= 1;
     }
 
+    // Momentum weight (from previous seasons)
+    const mom = club.momentum || 0;
+    ratingChange += Math.min(2, Math.floor(mom / 4));
+
+    // Update good/bad streaks (good 1-6, bad 13-18, neutral 7-12)
+    if (position >= 1 && position <= 6) {
+      club.consecutiveGoodSeasons = (club.consecutiveGoodSeasons || 0) + 1;
+      club.consecutiveBadSeasons = 0;
+    } else if (position >= 13 && position <= 18) {
+      club.consecutiveBadSeasons = (club.consecutiveBadSeasons || 0) + 1;
+      club.consecutiveGoodSeasons = 0;
+    } else {
+      club.consecutiveGoodSeasons = 0;
+      club.consecutiveBadSeasons = 0;
+    }
+
+    // 2+ good seasons in a row: extra boost
+    if ((club.consecutiveGoodSeasons || 0) >= 2) {
+      ratingChange += 1;
+      club.momentum = (club.momentum || 0) + 1;
+    }
+
+    // 2+ bad seasons in a row: extra drop, capped for smaller clubs
+    if ((club.consecutiveBadSeasons || 0) >= 2) {
+      if (club.rating > 77) ratingChange -= 1;
+      else ratingChange -= 0.5;
+    }
+
     club.rating = clamp(club.rating + ratingChange, 70, 95);
     club.lastSeasonPosition = position;
 
-    UL.game.lastSeasonSummary.ratingChanges.push({
-      clubId: club.id,
-      change: ratingChange
-    });
+    if (UL.game.lastSeasonSummary && UL.game.lastSeasonSummary.ratingChanges) {
+      UL.game.lastSeasonSummary.ratingChanges.push({
+        clubId: club.id,
+        change: ratingChange
+      });
+    }
 
-    // Apply proportional adjustment to squad
     club.squad.forEach(player => {
       player.overall = clamp(player.overall + ratingChange, 55, 99);
     });
-
   });
 
-  // ===== MOMENTUM DECAY =====
+  // Tier follows rating
   clubs.forEach(club => {
-    club.momentum = Math.max(0, club.momentum - 1);
+    club.tier = initialTierFromRating(club.rating);
   });
+
+  // Momentum decay
+  clubs.forEach(club => {
+    club.momentum = Math.max(0, (club.momentum || 0) - 1);
+  });
+}
+
+function endSeason() {
+
+  const L = UL.game.league;
+  const clubs = UL.game.clubs;
+
+  UL.game.lastSeasonSummary = {
+    finalTable: [...L.standings].sort((a,b)=>b.points-a.points),
+    ratingChanges: []
+  };
+
+  const finalTable = [...L.standings]
+    .sort((a, b) => b.points - a.points);
+
+  applySeasonRatingAndPowerDrift(finalTable);
 
   // ===== GOLDEN BOOT =====
   let goldenBoot = null;
@@ -1668,9 +1836,48 @@ function endSeason() {
 
   UL.game.activeCompetition = "league";
 
+  // Fresh budget for all (no carry-over); 75% of tier amount
+  UL.game.clubs.forEach(club => {
+    club.budget = getSeasonStartBudget(club.rating);
+  });
+  // League champion +25M
+  const championId = finalTable[0].clubId;
+  getClubById(championId).budget += 25_000_000;
+
+  // Anti-dominance: track back-to-back champion for next season dampener
+  if (UL.game.lastLeagueChampionId === championId) {
+    UL.game.dominantClubId = championId;
+  } else {
+    UL.game.dominantClubId = null;
+  }
+  UL.game.lastLeagueChampionId = championId;
+
+  // Apply morale pressure to dominant club (won 2 in a row) for this season
+  if (UL.game.dominantClubId) {
+    const dominantClub = getClubById(UL.game.dominantClubId);
+    if (dominantClub && dominantClub.squad) {
+      dominantClub.squad.forEach(p => {
+        p.morale = clamp((p.morale || 70) - 8, 40, 95);
+      });
+      showNotification(`${dominantClub.name} are under pressure after winning the league twice in a row.`);
+    }
+  }
+
+  // Cup winner +50M (only if cup was played this season)
+  if (UL.game.lastCupSummary && UL.game.lastCupSummary.winnerId) {
+    getClubById(UL.game.lastCupSummary.winnerId).budget += 50_000_000;
+  }
+
+  applyAIRebuildMode(finalTable);
+
   UL.game.clubs.forEach(club => {
     if (club.id !== UL.game.selectedClubId) {
-      assignAITacticsByTier(club);
+      if (club._rebuildTacticsTierAbove != null) {
+        assignAITacticsByTier(club, club._rebuildTacticsTierAbove);
+        delete club._rebuildTacticsTierAbove;
+      } else {
+        assignAITacticsByTier(club);
+      }
     }
   });
 
@@ -2068,48 +2275,16 @@ function renderCupFinalStats() {
 
 function endSeasonLogicOnly() {
   const L = UL.game.league;
-  const clubs = UL.game.clubs;
 
   UL.game.lastSeasonSummary = {
-    finalTable: [...UL.game.league.standings].sort((a,b)=>b.points-a.points),
+    finalTable: [...L.standings].sort((a,b)=>b.points-a.points),
     ratingChanges: []
   };
 
   const finalTable = [...L.standings].sort((a,b)=>b.points-a.points);
-
-  finalTable.forEach((row,index)=>{
-    const club = getClubById(row.clubId);
-    const position = index+1;
-
-    let ratingChange = 0;
-
-    if(position === 1){ ratingChange +=1; club.momentum+=3;
-        UL.game.trophies[club.id] = (UL.game.trophies[club.id] || 0) + 1
-    }
-
-    if(position === finalTable.length){ ratingChange -=1; }
-
-    if(position>1 && position<=9){
-      if(randInt(0,1)===1) ratingChange+=1;
-    }
-
-    if(position>9 && position<finalTable.length){
-      if(randInt(0,1)===1) ratingChange-=1;
-    }
-
-    club.rating = clamp(club.rating+ratingChange,70,95);
-    club.lastSeasonPosition = position;
-
-    club.squad.forEach(player=>{
-      player.overall = clamp(player.overall+ratingChange,55,99);
-    });
-  });
+  applySeasonRatingAndPowerDrift(finalTable);
 
   applyPlayerAging();
-
-  clubs.forEach(club=>{
-    club.momentum = Math.max(0,club.momentum-1);
-  });
 }
 
 function getFlagEmoji(countryCode) {
@@ -2162,6 +2337,11 @@ function openPlayerModal(playerId) {
     <div class="stat-row">
       <span>Wage</span>
       <span>€${player.wage.toLocaleString()}</span>
+    </div>
+
+    <div class="stat-row">
+      <span>Personality</span>
+      <span>${getPersonalityDisplayName(player.personality || "professional")}</span>
     </div>
 
     <button onclick="openSellModalById('${player.id}')">Sell Player</button>
@@ -2221,12 +2401,12 @@ if (!UL.game.transferMarket) {
   };
 }
 
-// 2️⃣ Generate exactly 15 market players
+// 2️⃣ Generate exactly 20 market players
 function generateTransferMarket() {
 
   const market = [];
 
-  for (let i = 0; i < 15; i++) {
+  for (let i = 0; i < 20; i++) {
     const randomClub = UL.game.clubs[randInt(0, UL.game.clubs.length - 1)];
     const posKeys = Object.keys(CONFIG.POS_DISTRIBUTION);
     const randomPos = posKeys[randInt(0, posKeys.length - 1)];
@@ -2674,12 +2854,12 @@ function buildStartingXI(club) {
 
   const req = formations[club.tactics.formation] || formations["4-3-3"];
 
-  // pick by position (rating), but also consider form & stamina slightly
+  // pick by position, more weight on rating (overall), less on form & stamina
   const score = (p) => {
     const ovr = p.overall ?? 0;
     const form = p.form ?? 50;
     const stamina = p.stamina ?? 80;
-    return ovr * 0.75 + form * 0.15 + stamina * 0.10;
+    return ovr * 0.88 + form * 0.08 + stamina * 0.04;
   };
 
   Object.entries(req).forEach(([pos, count]) => {
@@ -2821,14 +3001,15 @@ function tacklingDisciplineModifier(tackling) {
   return { strength: 0.1, redRisk: 0.12 };
 }
 
-function assignAITacticsByTier(club) {
+function assignAITacticsByTier(club, overrideTier) {
   ensureClubTactics(club);
 
   // ✅ Preserve locked formation forever
   const lockedFormation = club.formationLocked ? club.tactics.formation : null;
+  const effectiveTier = overrideTier != null ? overrideTier : club.tier;
 
-  // 🔥 1️⃣ IDENTITY OVERRIDE (HISTORY > TIER)
-  if (club.identity) {
+  // 🔥 1️⃣ IDENTITY OVERRIDE (HISTORY > TIER) — skipped when overrideTier (e.g. Rebuild)
+  if (club.identity && overrideTier == null) {
 
     // Base style
     club.tactics.style = club.identity.preferredStyle;
@@ -2848,7 +3029,7 @@ function assignAITacticsByTier(club) {
     } else if (club.identity.flexibility <= 0.2) {
       club.tactics.pressing = "low";
     } else {
-      club.tactics.pressing = "medium";  
+      club.tactics.pressing = "medium";
     }
 
     // Small stylistic defaults
@@ -2870,9 +3051,9 @@ function assignAITacticsByTier(club) {
     return; // 🔥 IMPORTANT — stop here if identity exists
   }
 
-  // 🔵 2️⃣ NORMAL TIER LOGIC (fallback)
+  // 🔵 2️⃣ NORMAL TIER LOGIC (fallback; uses effectiveTier for Rebuild)
 
-  if (club.tier === "Elite") {
+  if (effectiveTier === "Elite") {
     club.tactics.style = "possession";
     club.tactics.mentality = "attacking";
     club.tactics.pressing = "high";
@@ -2882,7 +3063,7 @@ function assignAITacticsByTier(club) {
     club.tactics.tackling = "normal";
   }
 
-  else if (club.tier === "Strong") {
+  else if (effectiveTier === "Strong") {
     club.tactics.style = ["possession","wingPlay"][randInt(0,1)];
     club.tactics.mentality = "balanced";
     club.tactics.pressing = "medium";
@@ -2892,7 +3073,7 @@ function assignAITacticsByTier(club) {
     club.tactics.tackling = "normal";
   }
 
-  else if (club.tier === "Competitive") {
+  else if (effectiveTier === "Competitive") {
     club.tactics.style = ["wingPlay","balanced","counter"][randInt(0,2)];
     club.tactics.mentality = "balanced";
     club.tactics.pressing = "medium";
@@ -2902,7 +3083,18 @@ function assignAITacticsByTier(club) {
     club.tactics.tackling = ["normal","aggressive"][randInt(0,1)];
   }
 
+  else if (effectiveTier === "Mid") {
+    club.tactics.style = ["balanced","counter"][randInt(0,1)];
+    club.tactics.mentality = "balanced";
+    club.tactics.pressing = "medium";
+    club.tactics.width = "balanced";
+    club.tactics.tempo = "balanced";
+    club.tactics.line = "balanced";
+    club.tactics.tackling = "normal";
+  }
+
   else {
+    // Underdog
     club.tactics.style = "counter";
     club.tactics.mentality = "defensive";
     club.tactics.pressing = "low";
