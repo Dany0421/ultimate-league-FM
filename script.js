@@ -370,8 +370,9 @@ function initWorld() {
     trophies: {},
     meta: {
       dominantStyle: null,
-      dominanceCounter: 0
-    }
+      dominanceCounter: 0,
+    },
+    activeCompetition: "league" // default to league, can be changed later
   };
 }
 
