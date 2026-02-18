@@ -372,6 +372,10 @@ function initWorld() {
       dominantStyle: null,
       dominanceCounter: 0,
     },
+    transferMarket: {
+      players: [],
+     history: []
+    },
     activeCompetition: "league" // default to league, can be changed later
   };
 }
@@ -3023,4 +3027,28 @@ function lockInitialFormation(club) {
   club.formationLocked = true;     // ✅ permanent flag
   club.initialFormation = club.tactics.formation; // optional for UI/debug
 }
+
+// ===============================
+// 🔥 TRANSFER MARKET SYSTEM V1
+// (ADD THIS AT THE VERY BOTTOM OF YOUR FILE)
+// ===============================
+
+// 1️⃣ Extend game object safely
+if (!UL.game.transferMarket) {
+  UL.game.transferMarket = {
+    players: [],
+    history: []
+  };
+}
+
+window.openPlayerModal = openPlayerModal;
+window.openSellModalById = openSellModalById;
+window.openTransferModal = openTransferModal;
+window.confirmBuyPlayer = confirmBuyPlayer;
+window.openClubModal = openClubModal;
+window.openAIPlayerModal = openAIPlayerModal;
+window.closeClubModal = closeClubModal;
+window.buyFromAIClub = buyFromAIClub;
+window.renewContract = renewContract;
+
 
