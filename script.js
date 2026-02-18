@@ -3041,14 +3041,37 @@ if (!UL.game.transferMarket) {
   };
 }
 
-window.openPlayerModal = openPlayerModal;
-window.openSellModalById = openSellModalById;
-window.openTransferModal = openTransferModal;
-window.confirmBuyPlayer = confirmBuyPlayer;
-window.openClubModal = openClubModal;
-window.openAIPlayerModal = openAIPlayerModal;
-window.closeClubModal = closeClubModal;
-window.buyFromAIClub = buyFromAIClub;
-window.renewContract = renewContract;
+// =============================
+// SAFE GLOBAL EXPOSURE WRAPPER
+// =============================
 
+(function() {
+
+  if (!window.UL || !window.UL.game) {
+    console.warn("UL not ready yet — delaying modal bindings...");
+    return;
+  }
+
+  // Ensure transferMarket exists
+  if (!UL.game.transferMarket) {
+    UL.game.transferMarket = {
+      players: [],
+      history: []
+    };
+  }
+
+  // Expose modals safely
+  window.openPlayerModal = openPlayerModal;
+  window.openSellModalById = openSellModalById;
+  window.openTransferModal = openTransferModal;
+  window.confirmBuyPlayer = confirmBuyPlayer;
+  window.openClubModal = openClubModal;
+  window.openAIPlayerModal = openAIPlayerModal;
+  window.closeClubModal = closeClubModal;
+  window.buyFromAIClub = buyFromAIClub;
+  window.renewContract = renewContract;
+
+  console.log("✅ Modal & transfer bindings safely attached.");
+
+})();
 
