@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Ultimate League - Manager Mode</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+
+<body>
+
+    <!-- TOP NAVBAR -->
+    <nav class="navbar">
+        <div class="logo">Ultimate League</div>
+        <div class="nav-links">
+            <button class="nav-btn" data-page="dashboard">Dashboard</button>
+            <button class="nav-btn" data-page="squad">Squad</button>
+            <button class="nav-btn" data-page="transfers">Transfers</button>
+            <button class="nav-btn" data-page="league">League</button>
+            <button class="nav-btn" data-page="tactics">Tactics</button>
+        </div>
+    </nav>
+
+    <!-- MAIN CONTENT -->
+    <main id="content">
+
+        <section id="dashboard" class="page active">
+            <h1>Welcome, Manager</h1>
+
+
+
+            <p>Start your journey to dominate the Ultimate League.</p>
+            <button id="startGameBtn" class="primary-btn">Start New Career</button>
+
+            <div id="careerPanel" class="career-panel" style="display:none;">
+                <h2 id="clubTitle"></h2>
+                <p id="nextMatchInfo"></p>
+                <button id="playMatchdayBtn" class="primary-btn">Play Matchday</button>
+            </div>
+
+            <div class="dashboard-card big-card" id="yourTeamCard">
+                <!-- Conteúdo do Club Aqui -->
+            </div>
+
+            <div class="dashboard-row">
+                <div class="dashboard-card league-card">
+                    <h2>League Top 8</h2>
+                    <div id="top8Table"></div>
+                </div>
+
+                <div class="dashboard-card league-card">
+                    <h2>Top Scorers</h2>
+                    <div id="topScorers"></div>
+                </div>
+            </div>
+
+        </section>
+
+        <section id="clubSelect" class="page">
+            <h1>Select Your Club</h1>
+            <div id="clubGrid" class="club-grid"></div>
+        </section>
+
+        <section id="matchdayResults" class="page">
+            <h1 id="mdTitle">Matchday Results</h1>
+
+            <div class="your-match-card" id="yourMatchCard"></div>
+
+            <h2 class="subhead">Other Results</h2>
+            <div class="results-list" id="otherResultsList"></div>
+
+            <button id="continueBtn" class="primary-btn">Continue</button>
+        </section>
+
+
+        <section id="squad" class="page">
+            <h2>Squad</h2>
+            <div id="squadWrap"></div>
+        </section>
+            
+        <section id="transfers" class="page">
+            <h1>Transfers</h1>
+            <div id="transferTableWrap"></div>
+            <h3>Transfer History</h3>
+            <div id="transferHistory"></div>
+        </section>
+
+        <section id="league" class="page">
+            <h1>League Table</h1>
+        </section>
+
+        <section id="cup" class="page">
+            <h1>Neo Egoist Cup</h1>
+
+            <h2 id="cupRoundTitle"></h2>
+
+            <div id="cupMatches"></div>
+
+            <button id="playCupRoundBtn" class="primary-btn">Play Round</button>
+        </section>
+
+        <section id="cupFinalStats" class="page">
+            <h1>Neo Egoist Cup – Final Stats</h1>
+            <div id="cupFinalStatsContent"></div>
+        </section>
+
+        <section id="tactics" class="page">
+            <h1>Tactics</h1>
+
+            <div class="tactic-section">
+            <label>Formation</label>
+            <select id="formationSelect"></select>
+            <select id="styleSelect">
+                <option value="balanced">Balanced</option>
+                <option value="possession">Possession</option>
+                <option value="wingPlay">Wing Play</option>
+                <option value="counter">Counter</option>
+                <option value="direct">Direct</option>
+            </select>
+            </div>
+
+            <div class="tactic-section">
+            <label>Mentality</label>
+            <select id="mentalitySelect">
+                <option value="defensive">Defensive</option>
+                <option value="balanced">Balanced</option>
+                <option value="attacking">Attacking</option>
+            </select>
+            </div>
+
+            <div class="tactic-section">
+            <label>Pressing</label>
+            <select id="pressingSelect">
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+            </select>
+            </div>
+
+            <div class="tactic-section">
+            <label>Width</label>
+            <select id="widthSelect">
+                <option value="narrow">Narrow</option>
+                <option value="balanced">Balanced</option>
+                <option value="wide">Wide</option>
+            </select>
+            </div>
+
+            <div class="tactic-section">
+            <label>Tempo</label>
+            <select id="tempoSelect">
+                <option value="slow">Slow</option>
+                <option value="balanced">Balanced</option>
+                <option value="fast">Fast</option>
+            </select>
+            </div>
+
+            <div class="tactic-section">
+            <label>Line</label>
+            <select id="lineSelect">
+                <option value="deep">Defend Deep</option>
+                <option value="balanced">Balanced</option>
+                <option value="high">High Line</option>
+            </select>
+            </div>
+
+            <div class="tactic-section">
+            <label>Tackling</label>
+            <select id="tacklingSelect">
+                <option value="careful">Careful</option>
+                <option value="normal">Normal</option>
+                <option value="aggressive">Aggressive</option>
+            </select>
+            </div>
+
+            <h2 style="margin-top:30px;">Advanced Boost (Dev Only)</h2>
+
+            <div class="tactic-section">
+                <label>GK Boost</label>
+                <input type="number" id="boostGK" min="0" max="20" value="0">
+            </div>
+
+            <div class="tactic-section">
+                <label>DEF Boost</label>
+                <input type="number" id="boostDEF" min="0" max="20" value="0">
+            </div>
+
+            <div class="tactic-section">
+                <label>MID Boost</label>
+                <input type="number" id="boostMID" min="0" max="20" value="0">
+            </div>
+
+            <div class="tactic-section">
+                <label>ATT Boost</label>
+                <input type="number" id="boostATT" min="0" max="20" value="0">
+            </div>
+
+            <button id="saveTacticsBtn" class="primary-btn">Save Tactics</button>
+        </section>
+
+    </main>
+
+    <div id="playerModal" class="modal hidden">
+        <div class="modal-content">
+            <span id="closeModal">&times;</span>
+            <div id="modalBody"></div>
+        </div>
+    </div>
+
+    <div id="transferModal" class="modal hidden">
+      <div class="modal-content">
+        <h2 id="modalPlayerName"></h2>
+
+        <div class="modal-stats">
+          <p><strong>Age:</strong> <span id="modalAge"></span></p>
+          <p><strong>OVR:</strong> <span id="modalOVR"></span></p>
+          <p><strong>POT:</strong> <span id="modalPOT"></span></p>
+          <p><strong>Price:</strong> €<span id="modalPrice"></span>M</p>
+        </div>
+
+        <div class="modal-actions">
+          <button id="confirmBuyBtn" class="btn-confirm">Confirm</button>
+          <button id="cancelBuyBtn" class="btn-cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Club Modal -->
+    <div id="clubModal" class="modal hidden">
+      <div class="modal-content">
+        <span class="close-btn" onclick="closeClubModal()">×</span>
+        <div id="clubModalBody"></div>
+      </div>
+    </div>
+
+    <script src="script.js"></script>
+
+</body>
+</html>
+
