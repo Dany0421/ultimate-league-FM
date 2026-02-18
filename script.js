@@ -3028,19 +3028,6 @@ function lockInitialFormation(club) {
   club.initialFormation = club.tactics.formation; // optional for UI/debug
 }
 
-// ===============================
-// 🔥 TRANSFER MARKET SYSTEM V1
-// (ADD THIS AT THE VERY BOTTOM OF YOUR FILE)
-// ===============================
-
-// 1️⃣ Extend game object safely
-if (!UL.game.transferMarket) {
-  UL.game.transferMarket = {
-    players: [],
-    history: []
-  };
-}
-
 // =============================
 // SAFE GLOBAL EXPOSURE WRAPPER
 // =============================
