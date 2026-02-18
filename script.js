@@ -50,6 +50,8 @@ const CONFIG = {
   // AI Rebuild Mode (bottom 3 each season)
   REBUILD_BUDGET_INJECTION: 8_000_000,
   REBUILD_PROSPECTS_COUNT: 1,
+  // Neo Egoist Cup: underdog strength bonus (lower-rated team gets boost)
+  CUP_UNDERDOG_BOOST: 0.8,
 };
 
 /** === CLUB LIST (Season 1) === **/
@@ -141,9 +143,27 @@ function getPersonalityDisplayName(p) {
 }
 
 /** === PLAYER GENERATION === **/
-const FIRST_NAMES = ["Leo", "Alex", "Ney", "Noah", "Kai", "Hugo", "Enzo", "Bruno", "Omar", "Dany", "Dave", "Puto", "Bola", "Lamine", "Nico", "Nathan", "Jacob", "Aaron", "Theo", "Dominic", "Kai",
-    "Max", "Malik", "Karim", "Isaac"];
-const LAST_NAMES  = ["Silva", "Khan", "Mendes", "Alves", "Costa", "Fernandes", "Santos", "Messi", "Pereira", "Ramos", "Bandeiroso", "Kali", "Lucca", "Yamal", "Williams", "Acosta", "Paredes", "Vieira", "Cardoso", "Abdullah", "Traoré", "Balde", "Boateng", "Sissoko", "Azizi"];
+const FIRST_NAMES = [
+  "Leo", "Alex", "Ney", "Noah", "Kai", "Hugo", "Enzo", "Bruno", "Omar", "Dany", "Dave", "Lamine", "Nico", "Nathan", "Jacob", "Aaron", "Theo", "Dominic",
+  "Max", "Malik", "Karim", "Isaac", "Lucas", "Gabriel", "Rafael", "Felipe", "Rodrigo", "Diego", "Sergio", "Andrés", "Marcos", "Paulo", "João", "Pedro", "Miguel", "Carlos", "Javier", "Antonio", "Marco", "Lorenzo",
+  "Mohamed", "Youssef", "Achraf", "Hakim", "Idrissa", "Sadio", "Kalidou", "Victor", "Pierre", "Kylian", "Ousmane", "Antoine", "N'Golo", "Paul", "Eden", "Romelu", "Kevin", "Thibaut", "Dries",
+  "Thomas", "Joshua", "Leon", "Serge", "Toni", "Manuel", "Ilkay", "Leroy", "Kai", "Jamal", "Phil", "Bukayo", "Marcus", "Jude", "Declan", "Harry", "Jordan", "Raheem",
+  "Cristiano", "Bernardo", "Rúben", "João", "Diogo", "Gonçalo", "Rafael", "Pepe", "William", "Vitinha",
+  "Virgil", "Darwin", "Luis", "Diogo", "Trent", "Andy", "Roberto", "Alisson", "Fabinho",
+  "Erling", "Martin", "Rodri", "İlkay", "Riyad", "Julian", "Nathan", "Kyle", "John", "Phil"
+];
+const LAST_NAMES = [
+  "Silva", "Khan", "Mendes", "Alves", "Costa", "Fernandes", "Santos", "Pereira", "Ramos", "Lucca", "Yamal", "Williams", "Acosta", "Paredes", "Vieira", "Cardoso", "Abdullah", "Traoré", "Balde", "Boateng", "Sissoko", "Azizi",
+  "Rodríguez", "García", "Martínez", "López", "Hernández", "González", "Pérez", "Sánchez", "Romero", "Torres", "Díaz", "Moreno", "Álvarez", "Ruiz", "Jiménez", "Vázquez", "Castro", "Ortega", "Molina", "Reyes",
+  "Oliveira", "Sousa", "Carvalho", "Ribeiro", "Ferreira", "Lopes", "Martins", "Teixeira", "Correia", "Gomes", "Rocha", "Nunes", "Coelho", "Cunha", "Dias", "Monteiro", "Cavaco", "Neves", "Félix", "Leão",
+  "Müller", "Schmidt", "Becker", "Fischer", "Weber", "Wagner", "Hoffmann", "Kroos", "Gündoğan", "Rüdiger", "Kimmich", "Havertz", "Goretzka", "Süle", "Neuer", "Reus", "Brandt", "Sané", "Gnabry",
+  "Martin", "Bernard", "Dubois", "Moreau", "Laurent", "Simon", "Lefebvre", "Michel", "Garcia", "David", "Pogba", "Kanté", "Mbappé", "Dembélé", "Griezmann", "Giroud", "Benzema", "Varane", "Hernández",
+  "Rossi", "Russo", "Ferrari", "Esposito", "Bianchi", "Romano", "Colombo", "Ricci", "Marino", "Greco", "Conti", "De Luca", "Mancini", "Costa", "Giordano", "Rizzo", "Lombardi", "Moretti", "Barbieri", "Fontana",
+  "Smith", "Jones", "Taylor", "Brown", "Wilson", "Walker", "White", "Roberts", "Robinson", "Thompson", "Wright", "Evans", "King", "Baker", "Green", "Harris", "Clark", "Lewis", "James", "Phillips",
+  "Nascimento", "Jesus", "Lima", "Araújo", "Barbosa", "Ribeiro", "Cavani", "Suárez", "Gómez", "Martínez", "Di María", "Dybala", "Lautaro", "Tagliafico", "Otamendi", "Romero", "De Paul", "Mac Allister",
+  "Mané", "Salah", "Keita", "Konaté", "Koné", "Camara", "Diallo", "Diop", "Ndidi", "Partey", "Zaha", "Aubameyang", "Pépé", "Onana", "André", "Koulibaly", "Mendy", "Bouna", "Gueye",
+  "Ødegaard", "Haaland", "Højlund", "Eriksen", "Schmeichel", "Lindelöf", "Isak", "Forsberg", "Berg", "Larsson", "Ibrahimović"
+];
 
 const NATIONALITIES = [
   { name: "England", code: "GB" },
@@ -636,6 +656,15 @@ function simulateMatch(homeClub, awayClub, matchContext) {
 
   homeStrength = tacticResult.homeStrength;
   awayStrength = tacticResult.awayStrength;
+
+  // Cup underdog buff (Neo Egoist Cup only): lower-rated team gets strength bonus
+  if (matchContext && matchContext.cupRound) {
+    const homeRating = homeClub.rating ?? 80;
+    const awayRating = awayClub.rating ?? 80;
+    const boost = CONFIG.CUP_UNDERDOG_BOOST ?? 0.8;
+    if (homeRating < awayRating) homeStrength += boost;
+    else if (awayRating < homeRating) awayStrength += boost;
+  }
 
   // ==========================
 
