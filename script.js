@@ -391,6 +391,7 @@ const startBtn = document.getElementById("startGameBtn");
 
 if (startBtn) {
   startBtn.addEventListener("click", () => {
+    UL.game = initWorld();   // 🔥 regenerate full world
     showClubSelection();
   });
 }
@@ -679,7 +680,9 @@ function simulateMatch(homeClub, awayClub) {
       player.injuryWeeks = randInt(1, 3);
       injuryOccurred = true;
 
-      showNotification(`🩺 ${player.name} injured for ${player.injuryWeeks} weeks`);
+      if (club.id === UL.game.selectedClubId) {
+        showNotification(`🩺 ${player.name} injured for ${player.injuryWeeks} weeks`);
+      }
     }
   });
 }
@@ -1086,7 +1089,9 @@ function decrementInjuries() {
         if (player.injuryWeeks <= 0) {
           player.injured = false;
           player.injuryWeeks = 0;
-          showNotification(`💪 ${player.name} recovered from injury`);
+          if (club.id === UL.game.selectedClubId) {
+            showNotification(`💪 ${player.name} recovered from injury`);
+          }
         }
       }
     });
