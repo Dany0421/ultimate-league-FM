@@ -876,9 +876,19 @@ function simulateCurrentMatchday() {
     // update form
     applyFormChanges(homeClub, awayClub, homeStanding, awayStanding, sim.homeGoals, sim.awayGoals);
 
-    const homeRevenue = Math.round(homeClub.reputation * 120000);
-    const awayRevenue = Math.round(awayClub.reputation * 80000);
-    homeClub.budget += homeRevenue; awayClub.budget += awayRevenue;
+    // Realistic match revenue
+    const tierMultiplier = {
+      "Elite": 1.3,
+      "Strong": 1.1,
+      "Competitive": 1.0,
+      "Mid": 0.8,
+      "Underdog": 0.6
+    };
+
+    const baseRevenue = randInt(150000, 700000);
+    const revenue = Math.round(baseRevenue * (tierMultiplier[homeClub.tier] || 1));
+
+    homeClub.budget += revenue;
 
     return {
       homeId: m.homeId, awayId: m.awayId,
@@ -1035,12 +1045,12 @@ document.addEventListener("DOMContentLoaded", () => {
   if (contBtn) {
     contBtn.addEventListener("click", () => {
       const L = UL.game.league;
+
       // advance matchday
       L.currentMatchday++;
       applyWeeklyWages();
       decrementSuspensions();
       decrementInjuries();
-      
 
       // 🔄 Transfer Market Refresh
       if (L.currentMatchday % CONFIG.MARKET_REFRESH_INTERVAL === 0) {
@@ -1049,7 +1059,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       // 🔥 INSTA START NEO EGOIST CUP
-      if (L.currentMatchday > L.fixtures.length) {
+      if (L.currentMatchday > L.fixtures.length && UL.game.activeCompetition === "league") {
 
         showNotification("League finished! Neo Egoist Cup begins!");
 
@@ -1057,6 +1067,7 @@ document.addEventListener("DOMContentLoaded", () => {
     
         return;
       }
+
       // update UI
       renderLeagueTable();
       renderTopScorers();
@@ -1073,6 +1084,7 @@ document.addEventListener("DOMContentLoaded", () => {
 function decrementSuspensions() {
   const L = UL.game.league; const currentMD = L.currentMatchday - 1;
   const matchday = L.fixtures[currentMD];
+  if (!matchday) return;
   matchday.forEach(match => {
     const clubs = [getClubById(match.homeId), getClubById(match.awayId)];
     clubs.forEach(club => {
