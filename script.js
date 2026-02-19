@@ -81,6 +81,11 @@ const CONFIG = {
   REBUILD_PROSPECTS_COUNT: 1,
   // Neo Egoist Cup: underdog strength bonus (lower-rated team gets boost)
   CUP_UNDERDOG_BOOST: 0.8,
+  // Dynamic AI transfers (per market-refresh window)
+  AI_TRANSFER_MAX_BUYS_PER_WINDOW: 2,
+  AI_TRANSFER_MAX_SELLS_PER_WINDOW: 1,
+  AI_BUY_RATING_CAP_OVER_CLUB: 2,
+  AI_SELL_ONLY_IF_MARKET_BELOW: 15,
 };
 
 /** === CLUB LIST (Season 1) === **/
@@ -1230,7 +1235,10 @@ document.addEventListener("DOMContentLoaded", () => {
       // 🔄 Transfer Market Refresh
       if (L.currentMatchday % CONFIG.MARKET_REFRESH_INTERVAL === 0) {
         generateTransferMarket();
+        runAITransferWindow();
         showNotification("⚡ Transfer Market Updated!");
+        if (document.getElementById("transferTableWrap")) renderTransferMarket();
+        if (document.getElementById("transferHistory")) renderTransferHistory();
       }
 
       // 🔥 INSTA START NEO EGOIST CUP
@@ -2588,13 +2596,19 @@ function renderTransferHistory() {
     return;
   }
 
+  const clubLabel = (h) => {
+    if (h.clubName) return h.clubName;
+    if (h.clubId == null) return "—";
+    const c = UL.game.clubs.find(cl => cl.id === h.clubId);
+    return c ? c.name : "—";
+  };
+
   container.innerHTML = `
     <h3>Season Transfer History</h3>
     ${history.map(h => `
       <div class="transfer-row ${h.type}">
-        <span>${h.type === "IN" ? "⬆ Bought" : "⬇ Sold"}</span>
-        <span>${h.name}</span>
-        <span>€${(h.value/1000000).toFixed(1)}M</span>
+        <span>[${clubLabel(h)}]</span>
+        <span>${h.type === "IN" ? "IN" : "OUT"}: ${h.name} €${(h.value/1000000).toFixed(1)}M</span>
       </div>
     `).join("")}
   `;
@@ -2711,12 +2725,15 @@ function confirmBuyPlayer(player) {
 
   UL.game.transferMarket.history.push({
     type: "IN",
+    clubId: club.id,
+    clubName: club.name,
     name: player.name,
     value: player.value
   });
 
   renderTransferMarket();
   renderTeamCard();
+  if (document.getElementById("transferHistory")) renderTransferHistory();
 }
 
 function openSellModal(player) {
@@ -2759,6 +2776,8 @@ function executeSell(player) {
 
   UL.game.transferMarket.history.push({
     type: "OUT",
+    clubId: club.id,
+    clubName: club.name,
     name: player.name,
     value: player.value
   });
@@ -2773,6 +2792,7 @@ function executeSell(player) {
   renderSquad();
   renderTeamCard();
   renderTransferMarket();
+  if (document.getElementById("transferHistory")) renderTransferHistory();
 }
 
 function openSellModalById(playerId) {
@@ -2944,7 +2964,108 @@ function tryAIFillFromMarket(club, soldPlayer) {
   market.splice(idx, 1);
   club.budget -= buy.value;
   club.squad.push(buy);
-  UL.game.transferMarket.history.push({ type: "OUT", name: buy.name, value: buy.value });
+  buildStartingXI(club);
+  UL.game.transferMarket.history.push({
+    type: "IN",
+    clubId: club.id,
+    clubName: club.name,
+    name: buy.name,
+    value: buy.value
+  });
+}
+
+function runAITransferWindow() {
+  const market = UL.game.transferMarket?.players;
+  if (!market) return;
+
+  const aiClubs = UL.game.clubs
+    .filter(c => c.id !== UL.game.selectedClubId && c.squad != null && c.budget != null)
+    .slice()
+    .sort((a, b) => (a.rating || 0) - (b.rating || 0));
+
+  const maxBuys = CONFIG.AI_TRANSFER_MAX_BUYS_PER_WINDOW ?? 2;
+  const maxSells = CONFIG.AI_TRANSFER_MAX_SELLS_PER_WINDOW ?? 1;
+  const ratingCap = CONFIG.AI_BUY_RATING_CAP_OVER_CLUB ?? 2;
+  const sellOnlyIfMarketBelow = CONFIG.AI_SELL_ONLY_IF_MARKET_BELOW ?? 15;
+
+  function positionCount(squad, pos) {
+    return squad.filter(p => (p.primaryPosition || p.position) === pos || p.secondaryPosition === pos).length;
+  }
+
+  function pickPositionNeed(club) {
+    ensureClubTactics(club);
+    const formation = club.tactics?.formation || "4-3-3";
+    const slots = formationSlots[formation] || formationSlots["4-3-3"];
+    const needs = [];
+    for (const pos of slots) {
+      if (positionCount(club.squad, pos) === 0) needs.push(pos);
+    }
+    if (needs.length) return needs[randInt(0, needs.length - 1)];
+    if (club.squad.length < CONFIG.SQUAD_SIZE) {
+      const posKeys = Object.keys(CONFIG.POS_DISTRIBUTION);
+      return posKeys[randInt(0, posKeys.length - 1)];
+    }
+    return null;
+  }
+
+  function doBuy(club, needPos) {
+    let candidates = market.filter(p => {
+      const prim = p.primaryPosition || p.position;
+      if (prim === needPos || p.secondaryPosition === needPos) return true;
+      return getSector(prim) === getSector(needPos);
+    });
+    candidates = candidates.filter(p =>
+      (p.overall || 0) <= (club.rating || 0) + ratingCap && p.value <= club.budget
+    );
+    if (candidates.length === 0) return false;
+    candidates.sort((a, b) => (b.overall || 0) - (a.overall || 0));
+    const buy = candidates[0];
+    const idx = market.findIndex(p => p.id === buy.id);
+    if (idx === -1) return false;
+    market.splice(idx, 1);
+    club.budget -= buy.value;
+    club.squad.push(buy);
+    buildStartingXI(club);
+    UL.game.transferMarket.history.push({
+      type: "IN",
+      clubId: club.id,
+      clubName: club.name,
+      name: buy.name,
+      value: buy.value
+    });
+    return true;
+  }
+
+  // Phase 1: all clubs buy (weaker first), max 2 per club
+  for (const club of aiClubs) {
+    let buys = 0;
+    while (buys < maxBuys) {
+      const need = pickPositionNeed(club);
+      if (!need || !doBuy(club, need)) break;
+      buys++;
+    }
+  }
+
+  // Phase 2: all clubs sell, max 1 per club (only if squad 20 and market below cap)
+  for (const club of aiClubs) {
+    if (club.squad.length !== CONFIG.SQUAD_SIZE || market.length >= sellOnlyIfMarketBelow) continue;
+    if (maxSells <= 0) continue;
+    const byOvr = club.squad.slice().sort((a, b) => (a.overall || 0) - (b.overall || 0));
+    const toSell = byOvr[0];
+    if (!toSell) continue;
+    const idx = club.squad.findIndex(p => p.id === toSell.id);
+    if (idx === -1) continue;
+    club.squad.splice(idx, 1);
+    club.budget += toSell.value;
+    market.push(toSell);
+    UL.game.transferMarket.history.push({
+      type: "OUT",
+      clubId: club.id,
+      clubName: club.name,
+      name: toSell.name,
+      value: toSell.value
+    });
+  }
 }
 
 function closeClubModal() {
