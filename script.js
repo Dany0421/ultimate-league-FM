@@ -103,35 +103,46 @@ function trainingAgeFactor(player) {
   return 0.25;
 }
 
-/** === CLUB LIST (Season 1) === **/
+/** === CLUB LIST – Top 36 from Top 5 Leagues (by rating, D1 = top 18, D2 = 19–36) === **/
 const CLUB_PRESETS = [
-  // Elite
+  // Division 1 (top 18 by rating)
   { name: "Manchester City", rating: 89 },
-  { name: "Real Madrid", rating: 88 },
+  { name: "Real Madrid", rating: 87 },
   { name: "Barcelona", rating: 88 },
-
-  // Strong
   { name: "Bayern Munich", rating: 86 },
   { name: "Paris Saint-Germain", rating: 86 },
   { name: "Liverpool", rating: 85 },
   { name: "Arsenal", rating: 84 },
-
-  // Competitive
+  { name: "Inter", rating: 84 },
   { name: "Atlético Madrid", rating: 83 },
   { name: "Chelsea", rating: 82 },
   { name: "Newcastle United", rating: 81 },
-
-  // Mid
   { name: "Borussia Dortmund", rating: 80 },
   { name: "Bayer Leverkusen", rating: 80 },
+  { name: "Juventus", rating: 80 },
   { name: "Manchester United", rating: 79 },
   { name: "Tottenham Hotspur", rating: 78 },
-
-  // Underdogs
+  { name: "AC Milan", rating: 78 },
   { name: "Napoli", rating: 77 },
-  { name: "Benfica", rating: 77 },
-  { name: "Aston Villa", rating: 76 },
-  { name: "Mambas", rating: 75 },
+  // Division 2 (19–36)
+  { name: "Aston Villa", rating: 77 },
+  { name: "RB Leipzig", rating: 77 },
+  { name: "Real Sociedad", rating: 76 },
+  { name: "West Ham United", rating: 76 },
+  { name: "Brighton & Hove Albion", rating: 76 },
+  { name: "Roma", rating: 76 },
+  { name: "Villarreal", rating: 75 },
+  { name: "Lazio", rating: 75 },
+  { name: "Nice", rating: 75 },
+  { name: "Marseille", rating: 75 },
+  { name: "Atalanta", rating: 75 },
+  { name: "Sevilla", rating: 74 },
+  { name: "Freiburg", rating: 74 },
+  { name: "Lyon", rating: 74 },
+  { name: "Eintracht Frankfurt", rating: 73 },
+  { name: "Real Betis", rating: 73 },
+  { name: "Lille", rating: 73 },
+  { name: "Nottingham Forest", rating: 72 },
 ];
 
 /** === UTILITIES === **/
@@ -147,23 +158,30 @@ function uid(prefix = "id") {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
 }
 
-/** === BOARD EXPECTATION (Closed league) === **/
+/** === BOARD EXPECTATION (Division 1 & 2, promotion/relegation) === **/
 function generateBoardExpectation(club) {
-  // closed league -> "Avoid Bottom 4" em vez de relegation
   const r = club.rating;
+  const div = club.division || 1;
 
-  // base expectation pelo rating
   let base;
-  if (r >= 85) base = "Win the League";
-  else if (r >= 80) base = "Top 4";
-  else if (r >= 76) base = "Top Half";
-  else base = "Avoid Bottom 4";
-
-  // ajuste leve pela época anterior (se existir)
-  // lastSeasonPosition: 1..18
-  if (club.lastSeasonPosition != null) {
-    if (club.lastSeasonPosition <= 4 && r < 85) base = "Top 4";
-    if (club.lastSeasonPosition >= 15 && r >= 75) base = "Avoid Bottom 4";
+  if (div === 1) {
+    if (r >= 85) base = "Win the League";
+    else if (r >= 80) base = "Top 4";
+    else if (r >= 76) base = "Top Half";
+    else base = "Avoid Relegation";
+    if (club.lastSeasonPosition != null) {
+      if (club.lastSeasonPosition <= 4 && r < 85) base = "Top 4";
+      if (club.lastSeasonPosition >= 16 && r >= 75) base = "Avoid Relegation";
+    }
+  } else {
+    if (r >= 80) base = "Win Promotion";
+    else if (r >= 76) base = "Push for Promotion";
+    else if (r >= 73) base = "Mid-table";
+    else base = "Avoid Bottom";
+    if (club.lastSeasonPosition != null) {
+      if (club.lastSeasonPosition <= 2 && r >= 76) base = "Win Promotion";
+      if (club.lastSeasonPosition >= 16) base = "Avoid Bottom";
+    }
   }
 
   return base;
@@ -461,6 +479,7 @@ function initWorld() {
       consecutiveBadSeasons: 0,
       squad: [],
       momentum: 0,
+      division: null, // set below: 1 = D1 (top 18), 2 = D2 (19–36)
       tactics: {
         ...TACTIC_DEFAULTS,
       },
@@ -483,12 +502,17 @@ function initWorld() {
       if (p.contractYears === undefined) p.contractYears = randInt(3,5);
     });
 
-    club.boardExpectation = generateBoardExpectation(club); // generated each season (kept for display)
-
     assignClubIdentity(club);
     assignAITacticsByTier(club);
 
     return club;
+  });
+
+  // Top 18 by rating = Division 1, rest = Division 2
+  clubs.sort((a, b) => b.rating - a.rating);
+  clubs.forEach((club, i) => {
+    club.division = i < 18 ? 1 : 2;
+    club.boardExpectation = generateBoardExpectation(club);
   });
 
   return {
@@ -1057,52 +1081,59 @@ function applyPersonalityMoraleUpdates(homeClub, awayClub, homeStanding, awaySta
 }
 
 function initLeague() {
+  const d1Clubs = UL.game.clubs.filter(c => c.division === 1);
+  const d2Clubs = UL.game.clubs.filter(c => c.division === 2);
   UL.game.league = {
-    fixtures: generateFixtures(UL.game.clubs.map(c => c.id)),
-    standings: createStandings(UL.game.clubs),
-    currentMatchday: 1,
-    lastMatchdayResults: null,
+    division1: {
+      standings: createStandings(d1Clubs),
+      fixtures: generateFixtures(d1Clubs.map(c => c.id)),
+      currentMatchday: 1,
+    },
+    division2: {
+      standings: createStandings(d2Clubs),
+      fixtures: generateFixtures(d2Clubs.map(c => c.id)),
+      currentMatchday: 1,
+    },
+    lastMatchdayResults: null, // { division1: { number, matches }, division2: { number, matches } }
   };
   UL.game.activeCompetition = "league";
 }
 
-function findUserMatch(matchdayMatches) {
-  const myId = UL.game.selectedClubId;
-  return matchdayMatches.find(m => m.homeId === myId || m.awayId === myId);
+function getDivisionForClub(clubId) {
+  const club = getClubById(clubId);
+  return club ? club.division : 1;
 }
 
-function simulateCurrentMatchday() {
-  if (!UL.game.league || !UL.game.league.fixtures) return;
+function findUserMatch(matchdayMatches) {
+  const myId = UL.game.selectedClubId;
+  return matchdayMatches ? matchdayMatches.find(m => m.homeId === myId || m.awayId === myId) : null;
+}
+
+function simulateOneDivisionMatchday(divKey) {
   const L = UL.game.league;
-  const idx = L.currentMatchday - 1;
-  const matchday = L.fixtures[idx];
+  const div = L[divKey];
+  if (!div || !div.fixtures) return null;
+  const idx = div.currentMatchday - 1;
+  const matchday = div.fixtures[idx];
+  if (!matchday) return null;
 
   const results = matchday.map(m => {
     const homeClub = getClubById(m.homeId);
     const awayClub = getClubById(m.awayId);
-    const matchContext = { cupRound: null, leagueMatchday: L.currentMatchday, totalLeagueMatchdays: L.fixtures.length };
+    const matchContext = { cupRound: null, leagueMatchday: div.currentMatchday, totalLeagueMatchdays: div.fixtures.length, isCup: false };
     const sim = simulateMatch(homeClub, awayClub, matchContext);
 
-    // update standings
     const { home: homeStanding, away: awayStanding } =
-      updateStandingsAfterMatch(L.standings, m.homeId, m.awayId, sim.homeGoals, sim.awayGoals);
+      updateStandingsAfterMatch(div.standings, m.homeId, m.awayId, sim.homeGoals, sim.awayGoals);
 
-    // update form
     applyFormChanges(homeClub, awayClub, homeStanding, awayStanding, sim.homeGoals, sim.awayGoals);
-    applyPersonalityMoraleUpdates(homeClub, awayClub, homeStanding, awayStanding, sim.homeGoals, sim.awayGoals, L.standings);
+    applyPersonalityMoraleUpdates(homeClub, awayClub, homeStanding, awayStanding, sim.homeGoals, sim.awayGoals, div.standings);
 
-    // Realistic match revenue
     const tierMultiplier = {
-      "Elite": 1.3,
-      "Strong": 1.1,
-      "Competitive": 1.0,
-      "Mid": 0.8,
-      "Underdog": 0.6
+      "Elite": 1.3, "Strong": 1.1, "Competitive": 1.0, "Mid": 0.8, "Underdog": 0.6
     };
-
     const baseRevenue = randInt(150000, 700000);
     const revenue = Math.round(baseRevenue * (tierMultiplier[homeClub.tier] || 1));
-
     homeClub.budget += revenue;
 
     return {
@@ -1114,7 +1145,20 @@ function simulateCurrentMatchday() {
     };
   });
 
-  L.lastMatchdayResults = { number: L.currentMatchday, matches: results };
+  return { number: div.currentMatchday, matches: results };
+}
+
+function simulateCurrentMatchday() {
+  if (!UL.game.league || !UL.game.league.division1) return;
+  const L = UL.game.league;
+
+  const res1 = simulateOneDivisionMatchday("division1");
+  const res2 = simulateOneDivisionMatchday("division2");
+
+  L.lastMatchdayResults = {
+    division1: res1,
+    division2: res2,
+  };
   renderMatchdayResults();
   rendertop8Table();
   renderTeamCard();
@@ -1123,65 +1167,71 @@ function simulateCurrentMatchday() {
 function renderMatchdayResults() {
   const L = UL.game.league;
   const res = L.lastMatchdayResults;
+  if (!res || !res.division1 || !res.division2) return;
+
+  const myId = UL.game.selectedClubId;
+  const myDivision = getDivisionForClub(myId);
+  const myRes = myDivision === 1 ? res.division1 : res.division2;
+  const userMatch = findUserMatch(myRes.matches);
+
   const title = document.getElementById("mdTitle");
-  title.textContent = `Matchday ${res.number} Results`;
-
-  const userMatch = findUserMatch(res.matches);
-  const other = res.matches.filter(m => m !== userMatch);
-
-  // Your match card
-  const homeClub = getClubById(userMatch.homeId);
-  const awayClub = getClubById(userMatch.awayId);
+  title.textContent = `Matchday ${res.division1.number} Results`;
 
   const card = document.getElementById("yourMatchCard");
-  card.innerHTML = `
-    <div class="your-match-top">
-      <div class="team-name">${homeClub.name}</div>
-      <div class="score">${userMatch.homeGoals} - ${userMatch.awayGoals}</div>
-      <div class="team-name">${awayClub.name}</div>
-    </div>
-    <div class="mini-stats">
-      <div>Shots: ${userMatch.stats.shotsHome} - ${userMatch.stats.shotsAway}</div>
-      <div>Possession: ${userMatch.stats.possHome}% - ${userMatch.stats.possAway}%</div>
-    </div>
-    <div class="motm-highlight">
-      ⭐ MOTM: ${userMatch.motm.name} (${formatPlayerPosition(userMatch.motm)})
-    </div>
-  `;
+  if (userMatch) {
+    const homeClub = getClubById(userMatch.homeId);
+    const awayClub = getClubById(userMatch.awayId);
+    card.innerHTML = `
+      <div class="your-match-top">
+        <div class="team-name">${homeClub.name}</div>
+        <div class="score">${userMatch.homeGoals} - ${userMatch.awayGoals}</div>
+        <div class="team-name">${awayClub.name}</div>
+      </div>
+      <div class="mini-stats">
+        <div>Shots: ${userMatch.stats.shotsHome} - ${userMatch.stats.shotsAway}</div>
+        <div>Possession: ${userMatch.stats.possHome}% - ${userMatch.stats.possAway}%</div>
+      </div>
+      <div class="motm-highlight">
+        ⭐ MOTM: ${userMatch.motm.name} (${formatPlayerPosition(userMatch.motm)})
+      </div>
+    `;
+  } else {
+    card.innerHTML = "<p>No match this matchday</p>";
+  }
 
-  // Other results list
   const list = document.getElementById("otherResultsList");
   list.innerHTML = "";
-  other.forEach(m => {
-    const h = getClubById(m.homeId);
-    const a = getClubById(m.awayId);
-    const row = document.createElement("div");
-    row.className = "result-row";
-    row.textContent = `${h.name} ${m.homeGoals} - ${m.awayGoals} ${a.name}`;
-    list.appendChild(row);
-  });
 
-  // switch page to matchdayResults
+  const d1Other = res.division1.matches.filter(m => m !== userMatch);
+  const d2Other = res.division2.matches.filter(m => m !== userMatch);
+
+  const addSection = (label, matches) => {
+    if (matches.length === 0) return;
+    const heading = document.createElement("div");
+    heading.className = "results-section-title";
+    heading.textContent = label;
+    list.appendChild(heading);
+    matches.forEach(m => {
+      const h = getClubById(m.homeId);
+      const a = getClubById(m.awayId);
+      const row = document.createElement("div");
+      row.className = "result-row";
+      row.textContent = `${h.name} ${m.homeGoals} - ${m.awayGoals} ${a.name}`;
+      list.appendChild(row);
+    });
+  };
+
+  addSection("Division 1", myDivision === 1 ? d1Other : res.division1.matches);
+  addSection("Division 2", myDivision === 2 ? d2Other : res.division2.matches);
+
   const pages = document.querySelectorAll(".page");
   pages.forEach(p => p.classList.remove("active"));
   document.getElementById("matchdayResults").classList.add("active");
 }
 
-function renderLeagueTable() {
-  const L = UL.game.league;
-  sortStandings(L.standings);
-
-  const leagueSection = document.getElementById("league");
-  // inject a table container if missing
-  let wrap = document.getElementById("leagueTableWrap");
-  if (!wrap) {
-    wrap = document.createElement("div");
-    wrap.id = "leagueTableWrap";
-    wrap.className = "table-wrap";
-    leagueSection.appendChild(wrap);
-  }
-
-  const rows = L.standings.map((s, i) => {
+function buildLeagueTableHTML(standings) {
+  sortStandings(standings);
+  const rows = standings.map((s, i) => {
     const club = getClubById(s.clubId);
     const gd = s.goalsFor - s.goalsAgainst;
     return `
@@ -1203,17 +1253,38 @@ function renderLeagueTable() {
       </tr>
     `;
   }).join("");
+  return `
+    <thead>
+      <tr>
+        <th>#</th><th>Club</th><th>P</th><th>W</th><th>D</th><th>L</th>
+        <th>GF</th><th>GA</th><th>GD</th><th>Pts</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  `;
+}
+
+function renderLeagueTable() {
+  const L = UL.game.league;
+  if (!L || !L.division1 || !L.division2) return;
+
+  const leagueSection = document.getElementById("league");
+  let wrap = document.getElementById("leagueTableWrap");
+  if (!wrap) {
+    wrap = document.createElement("div");
+    wrap.id = "leagueTableWrap";
+    wrap.className = "table-wrap";
+    leagueSection.appendChild(wrap);
+  }
+
+  const table1 = buildLeagueTableHTML(L.division1.standings);
+  const table2 = buildLeagueTableHTML(L.division2.standings);
 
   wrap.innerHTML = `
-    <table class="league-table">
-      <thead>
-        <tr>
-          <th>#</th><th>Club</th><th>P</th><th>W</th><th>D</th><th>L</th>
-          <th>GF</th><th>GA</th><th>GD</th><th>Pts</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
+    <h3 class="division-title">Division 1</h3>
+    <table class="league-table">${table1}</table>
+    <h3 class="division-title">Division 2</h3>
+    <table class="league-table">${table2}</table>
   `;
 }
 
@@ -1225,12 +1296,17 @@ function updateDashboardNextMatchInfo() {
   if (!UL.game.selectedClubId) return;
 
   const myClub = getClubById(UL.game.selectedClubId);
-  title.textContent = `${myClub.name} — Season ${UL.game.season}`;
+  const divNum = myClub.division;
+  title.textContent = `${myClub.name} — Season ${UL.game.season} (Division ${divNum})`;
 
   const L = UL.game.league;
-  const md = L.currentMatchday;
-  const matches = L.fixtures[md - 1];
+  const div = divNum === 1 ? L.division1 : L.division2;
+  if (!div || !div.fixtures) return;
+  const md = div.currentMatchday;
+  const matches = div.fixtures[md - 1];
+  if (!matches) return;
   const myMatch = matches.find(m => m.homeId === myClub.id || m.awayId === myClub.id);
+  if (!myMatch) return;
   const oppId = myMatch.homeId === myClub.id ? myMatch.awayId : myMatch.homeId;
   const opp = getClubById(oppId);
   const venue = myMatch.homeId === myClub.id ? "Home" : "Away";
@@ -1261,16 +1337,16 @@ document.addEventListener("DOMContentLoaded", () => {
     contBtn.addEventListener("click", () => {
       const L = UL.game.league;
 
-      // advance matchday
-      L.currentMatchday++;
+      L.division1.currentMatchday++;
+      L.division2.currentMatchday++;
       applyWeeklyWages();
       decrementSuspensions();
       decrementInjuries();
       applyTrainingBetweenMatchdays();
       applyMercenaryMorale();
 
-      // 🔄 Transfer Market Refresh
-      if (L.currentMatchday % CONFIG.MARKET_REFRESH_INTERVAL === 0) {
+      const md = L.division1.currentMatchday;
+      if (md % CONFIG.MARKET_REFRESH_INTERVAL === 0) {
         generateTransferMarket();
         runAITransferWindow();
         showNotification("⚡ Transfer Market Updated!");
@@ -1278,17 +1354,14 @@ document.addEventListener("DOMContentLoaded", () => {
         if (document.getElementById("transferHistory")) renderTransferHistory();
       }
 
-      // 🔥 INSTA START NEO EGOIST CUP
-      if (L.currentMatchday > L.fixtures.length && UL.game.activeCompetition === "league") {
-
+      const d1Done = L.division1.currentMatchday > L.division1.fixtures.length;
+      const d2Done = L.division2.currentMatchday > L.division2.fixtures.length;
+      if (d1Done && d2Done && UL.game.activeCompetition === "league") {
         showNotification("League finished! Neo Egoist Cup begins!");
-
         startNeoEgoistCup();
-    
         return;
       }
 
-      // update UI
       renderLeagueTable();
       renderTopScorers();
       updateDashboardNextMatchInfo();
@@ -1302,16 +1375,18 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 function decrementSuspensions() {
-  const L = UL.game.league; const currentMD = L.currentMatchday - 1;
-  const matchday = L.fixtures[currentMD];
-  if (!matchday) return;
-  matchday.forEach(match => {
-    const clubs = [getClubById(match.homeId), getClubById(match.awayId)];
-    clubs.forEach(club => {
-      club.squad.forEach(player => {
-        if (player.suspendedMatches > 0) {
-          player.suspendedMatches -= 1;
-        }
+  const L = UL.game.league;
+  [L.division1, L.division2].forEach(div => {
+    const currentMD = div.currentMatchday - 1;
+    const matchday = div.fixtures[currentMD];
+    if (!matchday) return;
+    matchday.forEach(match => {
+      const clubs = [getClubById(match.homeId), getClubById(match.awayId)];
+      clubs.forEach(club => {
+        if (!club) return;
+        club.squad.forEach(player => {
+          if (player.suspendedMatches > 0) player.suspendedMatches -= 1;
+        });
       });
     });
   });
@@ -1363,21 +1438,22 @@ function applyMercenaryMorale() {
 function rendertop8Table() {
   const container = document.getElementById("top8Table");
   if (!container) return;
-  if (!UL.game.league) return;
+  const L = UL.game.league;
+  if (!L || !L.division1 || !L.division2) return;
 
-  const sorted = [...UL.game.league.standings]
-    .sort((a, b) => b.points - a.points)
-    .slice(0, 8);
+  const d1Sorted = [...L.division1.standings].sort((a, b) => b.points - a.points).slice(0, 4);
+  const d2Sorted = [...L.division2.standings].sort((a, b) => b.points - a.points).slice(0, 2);
 
-  container.innerHTML = sorted.map((row, index) => {
+  const rows = [];
+  d1Sorted.forEach((row, i) => {
     const club = getClubById(row.clubId);
-    return `
-      <div class="top-row">
-        <span>${index + 1}. ${club.name}</span>
-        <span>${row.points} pts</span>
-      </div>
-    `;
-  }).join("");
+    rows.push(`<div class="top-row"><span>D1 ${i + 1}. ${club.name}</span><span>${row.points} pts</span></div>`);
+  });
+  d2Sorted.forEach((row, i) => {
+    const club = getClubById(row.clubId);
+    rows.push(`<div class="top-row"><span>D2 ${i + 1}. ${club.name}</span><span>${row.points} pts</span></div>`);
+  });
+  container.innerHTML = rows.join("");
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -1393,15 +1469,16 @@ function renderTeamCard() {
   const clubId = UL.game.selectedClubId;
   if (!clubId || !UL.game.league) return;
 
-  sortStandings(UL.game.league.standings);
-
   const club = UL.game.clubs.find(c => c.id === clubId);
-  const standing = UL.game.league.standings.find(s => s.clubId === clubId);
+  if (!club) return;
+  const div = club.division === 1 ? UL.game.league.division1 : UL.game.league.division2;
+  if (!div) return;
+  sortStandings(div.standings);
+  const standing = div.standings.find(s => s.clubId === clubId);
+  if (!standing) return;
 
-  if (!club || !standing) return;
-
-  const rating = club.rating || 85; // usa rating real se tiveres
-  const position = UL.game.league.standings.indexOf(standing) + 1;
+  const rating = club.rating || 85;
+  const position = div.standings.indexOf(standing) + 1;
 
   const tier =
     rating >= 90 ? "Elite" :
@@ -1653,15 +1730,14 @@ function saveTacticsV2() {
  ************************************************/
 
 function startNeoEgoistCup() {
-  const sorted = [...UL.game.league.standings]
-    .sort((a, b) => b.points - a.points)
-    .slice(0, 8);
-
-  const top8Ids = sorted.map(s => s.clubId);
+  const L = UL.game.league;
+  const d1Top5 = [...L.division1.standings].sort((a, b) => b.points - a.points).slice(0, 5).map(s => s.clubId);
+  const d2Top3 = [...L.division2.standings].sort((a, b) => b.points - a.points).slice(0, 3).map(s => s.clubId);
+  const cupTeamIds = [...d1Top5, ...d2Top3];
 
   UL.game.cup = {
     round: "Quarter Finals",
-    teams: shuffle([...top8Ids]),
+    teams: shuffle([...cupTeamIds]),
     matches: [],
     history: [],
     eliminated: []
@@ -1934,28 +2010,50 @@ function endSeason() {
   const L = UL.game.league;
   const clubs = UL.game.clubs;
 
+  const finalTableD1 = [...L.division1.standings].sort((a, b) => b.points - a.points);
+  const finalTableD2 = [...L.division2.standings].sort((a, b) => b.points - a.points);
+
   UL.game.lastSeasonSummary = {
-    finalTable: [...L.standings].sort((a,b)=>b.points-a.points),
-    ratingChanges: []
+    finalTableD1,
+    finalTableD2,
+    ratingChanges: [],
+    promoted: [],
+    relegated: []
   };
 
-  const finalTable = [...L.standings]
-    .sort((a, b) => b.points - a.points);
+  applySeasonRatingAndPowerDrift(finalTableD1);
+  applySeasonRatingAndPowerDrift(finalTableD2);
 
-  applySeasonRatingAndPowerDrift(finalTable);
+  // ===== PROMOTION / RELEGATION (2 up 2 down; if 3rd D2 wins cup → 3 up 3 down) =====
+  const cupWinnerId = UL.game.lastCupSummary && UL.game.lastCupSummary.winnerId ? UL.game.lastCupSummary.winnerId : null;
+  const thirdD2ClubId = finalTableD2[2] ? finalTableD2[2].clubId : null;
+  const thirdD2WonCup = cupWinnerId === thirdD2ClubId;
 
-  // ===== GOLDEN BOOT =====
-  let goldenBoot = null;
+  let promotedIds = [finalTableD2[0].clubId, finalTableD2[1].clubId];
+  let relegatedIds = [finalTableD1[16].clubId, finalTableD1[17].clubId]; // 17th, 18th
 
+  if (thirdD2WonCup) {
+    promotedIds = [finalTableD2[0].clubId, finalTableD2[1].clubId, finalTableD2[2].clubId];
+    relegatedIds = [finalTableD1[15].clubId, finalTableD1[16].clubId, finalTableD1[17].clubId]; // 16th, 17th, 18th
+    showNotification(`${getClubById(thirdD2ClubId).name} won the cup and steal promotion to Division 1!`);
+  }
+
+  promotedIds.forEach(id => { const c = getClubById(id); if (c) c.division = 1; });
+  relegatedIds.forEach(id => { const c = getClubById(id); if (c) c.division = 2; });
+  UL.game.lastSeasonSummary.promoted = promotedIds;
+  UL.game.lastSeasonSummary.relegated = relegatedIds;
+
+  // ===== GOLDEN BOOT (per division) =====
+  let goldenBootD1 = null;
+  let goldenBootD2 = null;
   UL.game.clubs.forEach(club => {
+    const isD1 = club.division === 1;
     club.squad.forEach(player => {
       if (player.goals && player.goals > 0) {
-        if (!goldenBoot || player.goals > goldenBoot.goals) {
-          goldenBoot = {
-            name: player.name,
-            goals: player.goals,
-            club: club.name
-          };
+        const target = isD1 ? goldenBootD1 : goldenBootD2;
+        if (!target || player.goals > target.goals) {
+          const boot = { name: player.name, goals: player.goals, club: club.name };
+          if (isD1) goldenBootD1 = boot; else goldenBootD2 = boot;
         }
       }
     });
@@ -1963,25 +2061,20 @@ function endSeason() {
 
   // CONTRACT COUNTDOWN
   UL.game.clubs.forEach(club => {
-
-    // diminuir 1 ano de contrato
     club.squad.forEach(player => {
-      if (player.contractYears !== undefined) {
-        player.contractYears -= 1;
-      }
+      if (player.contractYears !== undefined) player.contractYears -= 1;
     });
-
-    // remover jogadores sem contrato
     club.squad = club.squad.filter(player => {
       if (player.contractYears !== undefined && player.contractYears <= 0) {
         showNotification(`${player.name} left on free transfer`);
         return false;
       }
       return true;
-      });
+    });
   });
 
-  UL.game.lastGoldenBoot = goldenBoot;
+  UL.game.lastGoldenBootD1 = goldenBootD1;
+  UL.game.lastGoldenBootD2 = goldenBootD2;
 
   applySeasonPerformanceBonuses();
   applyPlayerAging();
@@ -1990,27 +2083,22 @@ function endSeason() {
   UL.game.clubs.forEach(c => considerAIStyleChange(c));
 
   UL.game.clubs.forEach(club => {
-    club.squad.forEach(player => {
-        player.goals = 0;
-    });
+    club.squad.forEach(player => { player.goals = 0; });
   });
 
   // ===== START NEW SEASON =====
   UL.game.season += 1;
 
   initLeague();
-
   UL.game.activeCompetition = "league";
 
-  // Fresh budget for all (no carry-over); 75% of tier amount
   UL.game.clubs.forEach(club => {
     club.budget = getSeasonStartBudget(club.rating);
   });
-  // League champion +25M
-  const championId = finalTable[0].clubId;
+
+  const championId = finalTableD1[0].clubId;
   getClubById(championId).budget += 25_000_000;
 
-  // Anti-dominance: track back-to-back champion for next season dampener
   if (UL.game.lastLeagueChampionId === championId) {
     UL.game.dominantClubId = championId;
   } else {
@@ -2018,7 +2106,6 @@ function endSeason() {
   }
   UL.game.lastLeagueChampionId = championId;
 
-  // Apply morale pressure to dominant club (won 2 in a row) for this season
   if (UL.game.dominantClubId) {
     const dominantClub = getClubById(UL.game.dominantClubId);
     if (dominantClub && dominantClub.squad) {
@@ -2029,12 +2116,12 @@ function endSeason() {
     }
   }
 
-  // Cup winner +50M (only if cup was played this season)
   if (UL.game.lastCupSummary && UL.game.lastCupSummary.winnerId) {
     getClubById(UL.game.lastCupSummary.winnerId).budget += 50_000_000;
   }
 
-  applyAIRebuildMode(finalTable);
+  applyAIRebuildMode(finalTableD1);
+  applyAIRebuildMode(finalTableD2);
 
   UL.game.clubs.forEach(club => {
     if (club.id !== UL.game.selectedClubId) {
@@ -2047,13 +2134,11 @@ function endSeason() {
     }
   });
 
-  UL.game.league.currentMatchday = 1;
-
   UL.game.transferMarket.players = [];
   UL.game.transferMarket.history = [];
   generateTransferMarket();
 
-  showNotification("Season ended. Welcome to Season " + UL.game.season)
+  showNotification("Season ended. Welcome to Season " + UL.game.season);
 
   updateDashboardNextMatchInfo();
   renderLeagueTable();
@@ -2074,6 +2159,9 @@ function considerAIStyleChange(club) {
   if (expectation === "Win the League" && position > 3) underperformed = true;
   if (expectation === "Top 4" && position > 6) underperformed = true;
   if (expectation === "Top Half" && position > 12) underperformed = true;
+  if (expectation === "Avoid Relegation" && position >= 17) underperformed = true;
+  if (expectation === "Win Promotion" && position > 2) underperformed = true;
+  if (expectation === "Push for Promotion" && position > 5) underperformed = true;
 
   if (!underperformed) return;
 
@@ -2261,33 +2349,39 @@ function renderCupFinalStats() {
     return;
   }
 
-  const finalTable = season.finalTable;
+  const finalTableD1 = season.finalTableD1 || [];
+  const finalTableD2 = season.finalTableD2 || [];
   const myId = UL.game.selectedClubId;
 
-  // ====== LEAGUE BASIC ======
-  const championRow = finalTable[0];
-  const championClub = getClubById(championRow.clubId);
-  const champTrophies = UL.game.trophies?.[championClub.id] || 0;
+  // ====== LEAGUE BASIC (D1 champion, Top 4 D1 + Top 2 D2) ======
+  const championRow = finalTableD1[0];
+  const championClub = championRow ? getClubById(championRow.clubId) : null;
+  const champTrophies = championClub ? (UL.game.trophies?.[championClub.id] || 0) : 0;
 
-  const top4 = finalTable.slice(0,4).map((row,i)=>{
+  const top4D1 = finalTableD1.slice(0, 4).map((row, i) => {
     const c = getClubById(row.clubId);
-    return `<div class="line"><span>${i+1}. ${c.name}</span><span>${row.points} pts</span></div>`;
+    return `<div class="line"><span>D1 ${i + 1}. ${c.name}</span><span>${row.points} pts</span></div>`;
   }).join("");
+  const top2D2 = finalTableD2.slice(0, 2).map((row, i) => {
+    const c = getClubById(row.clubId);
+    return `<div class="line"><span>D2 ${i + 1}. ${c.name}</span><span>${row.points} pts</span></div>`;
+  }).join("");
+  const top4 = top4D1 + top2D2;
 
-  const bottomClub = getClubById(finalTable[finalTable.length-1].clubId);
+  const bottomClub = finalTableD1.length ? getClubById(finalTableD1[finalTableD1.length - 1].clubId) : null;
 
-  // Gap 1º vs 2º
-  const gap = finalTable.length >= 2 ? (finalTable[0].points - finalTable[1].points) : 0;
+  const gap = finalTableD1.length >= 2 ? (finalTableD1[0].points - finalTableD1[1].points) : 0;
 
-  // ====== USER STATS ======
-  const myRowIndex = finalTable.findIndex(r => r.clubId === myId);
-  const myRow = finalTable[myRowIndex];
+  // ====== USER STATS (position in their division) ======
   const myClub = myId ? getClubById(myId) : null;
+  const myDivision = myClub ? myClub.division : 1;
+  const myTable = myDivision === 1 ? finalTableD1 : finalTableD2;
+  const myRowIndex = myTable.findIndex(r => r.clubId === myId);
+  const myRow = myRowIndex >= 0 ? myTable[myRowIndex] : null;
 
-  // Goals for/against do user (da tabela)
   const myGF = myRow ? myRow.goalsFor : 0;
   const myGA = myRow ? myRow.goalsAgainst : 0;
-  const myPos = myRowIndex >= 0 ? myRowIndex + 1 : "-";
+  const myPos = myRowIndex >= 0 ? `D${myDivision} ${myRowIndex + 1}` : "-";
 
   // Cup exit round (se não for winner)
   let cupExit = "Did not qualify";
@@ -2395,11 +2489,10 @@ function renderCupFinalStats() {
           <div><b>Bottom Club:</b> ${bottomClub.name}</div>
         </div>
 
-        ${UL.game.lastGoldenBoot ? `
+        ${(UL.game.lastGoldenBootD1 || UL.game.lastGoldenBootD2) ? `
           <div class="mini">
-            <b>Golden Boot:</b> ${UL.game.lastGoldenBoot.name}
-            (${UL.game.lastGoldenBoot.club}) - 
-            ${UL.game.lastGoldenBoot.goals} ⚽
+            ${UL.game.lastGoldenBootD1 ? `<div><b>Golden Boot D1:</b> ${UL.game.lastGoldenBootD1.name} (${UL.game.lastGoldenBootD1.club}) – ${UL.game.lastGoldenBootD1.goals} ⚽</div>` : ""}
+            ${UL.game.lastGoldenBootD2 ? `<div><b>Golden Boot D2:</b> ${UL.game.lastGoldenBootD2.name} (${UL.game.lastGoldenBootD2.club}) – ${UL.game.lastGoldenBootD2.goals} ⚽</div>` : ""}
           </div>
         ` : ""}
 
@@ -2443,12 +2536,12 @@ function endSeasonLogicOnly() {
   const L = UL.game.league;
 
   UL.game.lastSeasonSummary = {
-    finalTable: [...L.standings].sort((a,b)=>b.points-a.points),
-    ratingChanges: []
+    finalTableD1: [...L.division1.standings].sort((a, b) => b.points - a.points),
+    finalTableD2: [...L.division2.standings].sort((a, b) => b.points - a.points),
+    ratingChanges: [],
+    promoted: [],
+    relegated: []
   };
-
-  const finalTable = [...L.standings].sort((a,b)=>b.points-a.points);
-  applySeasonRatingAndPowerDrift(finalTable);
 
   applyPlayerAging();
 }
@@ -2699,12 +2792,14 @@ function renderTopScorers() {
   const container = document.getElementById("topScorers");
   if (!container) return;
 
-  const allPlayers = [];
+  const d1Players = [];
+  const d2Players = [];
 
   UL.game.clubs.forEach(club => {
+    const list = club.division === 1 ? d1Players : d2Players;
     club.squad.forEach(player => {
       if (player.goals > 0) {
-        allPlayers.push({
+        list.push({
           name: player.name,
           goals: player.goals,
           club: club.name,
@@ -2714,23 +2809,32 @@ function renderTopScorers() {
     });
   });
 
-  const sorted = allPlayers
-    .sort((a,b)=>b.goals-a.goals)
-    .slice(0,5);
+  const top3D1 = d1Players.sort((a, b) => b.goals - a.goals).slice(0, 3);
+  const top3D2 = d2Players.sort((a, b) => b.goals - a.goals).slice(0, 3);
 
-  if (!sorted.length) {
+  if (top3D1.length === 0 && top3D2.length === 0) {
     container.innerHTML = "<div>No goals yet</div>";
     return;
   }
 
-  container.innerHTML = sorted.map((p, index) => `
+  const row = (p, index) => `
     <div class="scorer-row">
-        <span>${index + 1}. ${p.name} <small>(${p.position})</small></span>
-        <span>${p.club}</span>
-        <span>${p.goals} ⚽</span>
+      <span>${index + 1}. ${p.name} <small>(${p.position})</small></span>
+      <span>${p.club}</span>
+      <span>${p.goals} ⚽</span>
     </div>
-  `).join("");
+  `;
 
+  let html = "";
+  if (top3D1.length) {
+    html += `<div class="scorers-division-label">Division 1</div>`;
+    html += top3D1.map((p, i) => row(p, i)).join("");
+  }
+  if (top3D2.length) {
+    html += `<div class="scorers-division-label">Division 2</div>`;
+    html += top3D2.map((p, i) => row(p, i)).join("");
+  }
+  container.innerHTML = html;
 }
 
 function openTransferModal(playerId) {
@@ -3460,7 +3564,7 @@ function simulateLeagueRoundSafe() {
 
   const L = UL.game.league;
 
-  if (!L || !L.fixtures) {
+  if (!L || !L.division1 || !L.division1.fixtures) {
     console.warn("League not initialized.");
     return;
   }
