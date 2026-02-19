@@ -14,6 +14,35 @@ const formations = {
   "3-4-3": { GK: 1, DEF: 3, MID: 4, ATT: 3}
 };
 
+/** === DETAILED POSITIONS (12 specific positions) === */
+const POSITIONS = ["GK", "RB", "LB", "CB", "CDM", "CM", "CAM", "LM", "RM", "RW", "LW", "ST"];
+const POSITION_SECTOR = { GK: "GK", RB: "DEF", LB: "DEF", CB: "DEF", CDM: "MID", CM: "MID", CAM: "MID", LM: "MID", RM: "MID", RW: "ATT", LW: "ATT", ST: "ATT" };
+function getSector(pos) { return POSITION_SECTOR[pos] || null; }
+function positionsInSector(sector) {
+  if (sector === "GK") return ["GK"];
+  return POSITIONS.filter(p => POSITION_SECTOR[p] === sector);
+}
+
+/** Formation as 11 slots (exact position per slot) */
+const formationSlots = {
+  "4-3-3": ["GK", "RB", "CB", "CB", "LB", "CM", "CM", "CAM", "RW", "LW", "ST"],
+  "4-4-2": ["GK", "RB", "CB", "CB", "LB", "RM", "CM", "CM", "LM", "ST", "ST"],
+  "3-5-2": ["GK", "CB", "CB", "CB", "LM", "CM", "CDM", "CM", "RM", "ST", "ST"],
+  "5-2-3": ["GK", "CB", "CB", "CB", "LB", "RB", "CM", "CM", "LW", "ST", "RW"],
+  "4-2-3-1": ["GK", "RB", "CB", "CB", "LB", "CDM", "CDM", "CAM", "LM", "RM", "ST"],
+  "3-4-3": ["GK", "CB", "CB", "CB", "LM", "CM", "CM", "RM", "LW", "ST", "RW"]
+};
+
+/** Style-by-position boost (decimal, e.g. 0.10 = +10%). Missing = 0. */
+const STYLE_POSITION_BOOST = {
+  balanced: {},
+  wingPlay: { RW: 0.10, LW: 0.10, ST: 0.05, RB: 0.05, LB: 0.05, CDM: -0.05 },
+  possession: { CM: 0.10, CAM: 0.10, CDM: 0.05, RW: -0.05, LW: -0.05, CB: 0.03, RB: 0.02, LB: 0.02 },
+  counter: { ST: 0.10, RW: 0.07, LW: 0.07, CAM: 0.05, CDM: 0.05, CB: 0.03, CM: -0.05 },
+  direct: { ST: 0.12, CAM: 0.05, CDM: 0.03, RW: -0.03, LW: -0.03, CM: -0.03, GK: 0.02 }
+};
+const OOP_PENALTY_MULTIPLIER = 0.85;
+
 function randomFormation() {
   const keys = Object.keys(formations);
   return keys[randInt(0, keys.length - 1)];
@@ -45,7 +74,7 @@ function ensureClubTactics(club) {
 const CONFIG = {
   SQUAD_SIZE: 20,
   JOB_SECURITY: 0.97, // quase impossível seres despedido (fase inicial)
-  POS_DISTRIBUTION: { GK: 2, DEF: 6, MID: 6, ATT: 6 },
+  POS_DISTRIBUTION: { GK: 2, RB: 2, LB: 2, CB: 3, CDM: 2, CM: 3, CAM: 2, LM: 1, RM: 1, RW: 2, LW: 2, ST: 2 },
   MARKET_REFRESH_INTERVAL: 5,
   // AI Rebuild Mode (bottom 3 each season)
   REBUILD_BUDGET_INJECTION: 8_000_000,
@@ -184,28 +213,18 @@ function randomName() {
 }
 
 function generatePlayer(position, clubRating, role = "normal") {
-  // overall por posição com variação
   let base = clubRating;
-
-  // estrelas e jovens
   if (role === "star") base += randInt(2, 4);
   if (role === "prospect") base -= randInt(1, 2);
-
   const overall = clamp(base + randInt(-4, 3), 50, 95);
-
   const nationality = NATIONALITIES[randInt(0, NATIONALITIES.length - 1)];
-
-  // idade
   let age;
   if (role === "prospect") age = randInt(17, 21);
   else if (role === "star") age = randInt(22, 30);
   else age = randInt(20, 34);
-
-  // potencial
   let potential = overall + randInt(0, 8);
   if (role === "prospect") potential = overall + randInt(6, 14);
   potential = clamp(potential, overall, 99);
-
   const morale = randInt(55, 85);
   const form = randInt(45, 80);
   const stamina = randInt(70, 100);
@@ -214,11 +233,18 @@ function generatePlayer(position, clubRating, role = "normal") {
   const baseWage = calcPlayerWage(overall, age);
   const wage = (personality === "mercenary") ? Math.round(baseWage * 1.2) : baseWage;
 
+  const primaryPosition = POSITIONS.includes(position) ? position : normalizeLegacyPosition(position);
+  const sector = getSector(primaryPosition);
+  const inSector = positionsInSector(sector).filter(p => p !== primaryPosition);
+  const secondaryPosition = inSector.length ? inSector[randInt(0, inSector.length - 1)] : primaryPosition;
+
   return {
     id: uid("p"),
     name: randomName(),
     age,
-    position, // GK / DEF / MID / ATT
+    position: primaryPosition,
+    primaryPosition,
+    secondaryPosition,
     overall,
     potential,
     value: calcPlayerValue(overall, age),
@@ -227,6 +253,7 @@ function generatePlayer(position, clubRating, role = "normal") {
     form,
     stamina,
     isStarter: false,
+    matchPosition: null,
     nationality: nationality.name,
     flag: nationality.code,
     goals: 0,
@@ -238,6 +265,39 @@ function generatePlayer(position, clubRating, role = "normal") {
     injured: false,
     injuryWeeks: 0,
   };
+}
+
+function normalizeLegacyPosition(oldPos) {
+  if (oldPos === "GK") return "GK";
+  if (oldPos === "DEF") return ["RB", "LB", "CB"][randInt(0, 2)];
+  if (oldPos === "MID") return ["CDM", "CM", "CAM", "LM", "RM"][randInt(0, 4)];
+  if (oldPos === "ATT") return ["RW", "LW", "ST"][randInt(0, 2)];
+  return POSITIONS[randInt(0, POSITIONS.length - 1)];
+}
+
+function formatPlayerPosition(p) {
+  ensurePlayerPositions(p);
+  const prim = p.primaryPosition || p.position;
+  const sec = p.secondaryPosition;
+  if (!sec || sec === prim) return prim || "—";
+  return `${prim} / ${sec}`;
+}
+
+function ensurePlayerPositions(p) {
+  if (p.primaryPosition != null && p.primaryPosition !== undefined) return;
+  const old = p.position;
+  if (POSITIONS.includes(old)) {
+    p.primaryPosition = old;
+    const sector = getSector(old);
+    const inSector = positionsInSector(sector).filter(x => x !== old);
+    p.secondaryPosition = inSector.length ? inSector[randInt(0, inSector.length - 1)] : old;
+  } else {
+    p.primaryPosition = normalizeLegacyPosition(old || "CM");
+    const sector = getSector(p.primaryPosition);
+    const inSector = positionsInSector(sector).filter(x => x !== p.primaryPosition);
+    p.secondaryPosition = inSector.length ? inSector[randInt(0, inSector.length - 1)] : p.primaryPosition;
+  }
+  p.position = p.primaryPosition;
 }
 
 function generateSquad(clubRating) {
@@ -630,9 +690,16 @@ function simulateMatch(homeClub, awayClub, matchContext) {
 
   const calcSectorOVR = (club, XI) => {
     const total = XI.reduce((acc, p) => {
-      const boost = club.cheatBoost?.[p.position] || 0;
-      const mod = personalityMatchModifier(p, matchContext);
-      return acc + (p.overall + boost + mod);
+      const matchPos = p.matchPosition || p.primaryPosition || p.position;
+      const sector = getSector(matchPos);
+      const boost = club.cheatBoost?.[matchPos] ?? club.cheatBoost?.[sector] ?? 0;
+      let contribution = p.overall + boost + personalityMatchModifier(p, matchContext);
+      const prim = p.primaryPosition || p.position;
+      const sec = p.secondaryPosition;
+      if (matchPos !== prim && matchPos !== sec) contribution *= OOP_PENALTY_MULTIPLIER;
+      const styleBoost = (STYLE_POSITION_BOOST[club.tactics?.style] || {})[matchPos] ?? 0;
+      contribution *= (1 + styleBoost);
+      return acc + contribution;
     }, 0);
     return total / XI.length;
   };
@@ -689,39 +756,28 @@ function simulateMatch(homeClub, awayClub, matchContext) {
   const possHome = clamp(Math.round(50 + (diff * 1.2) + randInt(-8, 8)), 35, 65);
   const possAway = 100 - possHome;
 
-  // === Assign Goals To Players ===
+  // === Assign Goals To Players (position-based weights: ST/RW/LW highest) ===
   function assignGoals(club, goals) {
-
     const scorers = [];
-
     const starters = club.squad.filter(p => p.isStarter);
-
-    // weighted pool
     const weightedPool = [];
-
     starters.forEach(p => {
+      const pos = p.matchPosition || p.primaryPosition || p.position;
       let weight = 1;
-
-      if (p.position === "ATT") weight = 6;
-      else if (p.position === "MID") weight = 3;
-      else if (p.position === "DEF") weight = 1;
-      else if (p.position === "GK") weight = 0.2;
-
-      for (let i = 0; i < weight; i++) {
-        weightedPool.push(p);
-      }
+      if (pos === "ST" || pos === "RW" || pos === "LW") weight = 6;
+      else if (pos === "CAM" || pos === "LM" || pos === "RM") weight = 3;
+      else if (pos === "CM" || pos === "CDM") weight = 2;
+      else if (pos === "RB" || pos === "LB" || pos === "CB") weight = 1;
+      else if (pos === "GK") weight = 0.2;
+      for (let i = 0; i < weight; i++) weightedPool.push(p);
     });
-
+    if (weightedPool.length === 0) return scorers;
     for (let i = 0; i < goals; i++) {
-
       const scorer = weightedPool[randInt(0, weightedPool.length - 1)];
-
       if (!scorer.goals) scorer.goals = 0;
       scorer.goals += 1;
-
       scorers.push(scorer);
     }
-
     return scorers;
   }
 
@@ -1048,7 +1104,7 @@ function renderMatchdayResults() {
       <div>Possession: ${userMatch.stats.possHome}% - ${userMatch.stats.possAway}%</div>
     </div>
     <div class="motm-highlight">
-      ⭐ MOTM: ${userMatch.motm.name} (${userMatch.motm.position})
+      ⭐ MOTM: ${userMatch.motm.name} (${formatPlayerPosition(userMatch.motm)})
     </div>
   `;
 
@@ -1337,7 +1393,6 @@ function renderSquad() {
   const club = getClubById(myId);
   if (!club) return;
 
-  // cria container se ainda não existir
   let wrap = document.getElementById("squadTableWrap");
   if (!wrap) {
     wrap = document.createElement("div");
@@ -1346,7 +1401,10 @@ function renderSquad() {
     squadSection.appendChild(wrap);
   }
 
-  const rows = club.squad.map(p => `
+  const filterVal = (document.getElementById("squadPositionFilter") && document.getElementById("squadPositionFilter").value) || "All";
+  const filtered = filterVal === "All" ? club.squad : club.squad.filter(p => (p.primaryPosition || p.position) === filterVal || p.secondaryPosition === filterVal);
+
+  const rows = filtered.map(p => `
     <tr class="${p.isStarter ? 'starter-row' : ''}" onclick="openPlayerModal('${p.id}')">
       <td>
       <img 
@@ -1357,7 +1415,7 @@ function renderSquad() {
       ${p.name}
       ${p.injured ? `<span style="color:red; font-weight:bold;"> (INJ ${p.injuryWeeks})</span>` : ""}
       </td>
-      <td>${p.position}</td>
+      <td>${formatPlayerPosition(p)}</td>
       <td>${p.age}</td>
       <td><b>${p.overall}</b></td>
       <td>${p.potential}</td>
@@ -1369,7 +1427,10 @@ function renderSquad() {
     </tr>
   `).join("");
 
+  const posOptions = ["All", ...POSITIONS].map(pos => `<option value="${pos}" ${filterVal === pos ? "selected" : ""}>${pos}</option>`).join("");
+
   wrap.innerHTML = `
+    <label>Filter by position: <select id="squadPositionFilter" onchange="renderSquad()">${posOptions}</select></label>
     <table class="squad-table">
       <thead>
         <tr>
@@ -1692,7 +1753,8 @@ function applyAIRebuildMode(finalTable) {
     for (let i = 0; i < n && club.squad.length >= 2; i++) {
       const victim = [...club.squad]
         .sort((a, b) => a.overall - b.overall || b.age - a.age)[0];
-      const pos = victim.position;
+      ensurePlayerPositions(victim);
+      const pos = victim.primaryPosition || victim.position;
       const idx = club.squad.indexOf(victim);
       club.squad.splice(idx, 1);
       club.squad.push(generatePlayer(pos, club.rating, "prospect"));
@@ -2333,8 +2395,8 @@ function openPlayerModal(playerId) {
 
   body.innerHTML = `
     <h2>${player.flag} ${player.name}</h2>
-    <span class="position-badge ${player.position}">
-      ${player.position}
+    <span class="position-badge ${(player.primaryPosition || player.position) || ''}">
+      ${formatPlayerPosition(player)}
     </span>
 
 
@@ -2466,13 +2528,16 @@ function renderTransferMarket() {
     section.appendChild(wrap);
   }
 
-  const rows = UL.game.transferMarket.players.map(p => `
+  const tfFilter = (document.getElementById("transferPositionFilter") && document.getElementById("transferPositionFilter").value) || "All";
+  const tfList = tfFilter === "All" ? UL.game.transferMarket.players : UL.game.transferMarket.players.filter(p => (p.primaryPosition || p.position) === tfFilter || p.secondaryPosition === tfFilter);
+
+  const rows = tfList.map(p => `
     <tr onclick="openTransferModal('${p.id}')">
       <td>
         <img class="flag" src="https://flagcdn.com/24x18/${p.flag.toLowerCase()}.png">
         ${p.name}
       </td>
-      <td>${p.position}</td>
+      <td>${formatPlayerPosition(p)}</td>
       <td>${p.age}</td>
       <td><b>${p.overall}</b></td>
       <td>${p.potential}</td>
@@ -2480,8 +2545,11 @@ function renderTransferMarket() {
     </tr>
   `).join("");
 
+  const tfPosOptions = ["All", ...POSITIONS].map(pos => `<option value="${pos}" ${tfFilter === pos ? "selected" : ""}>${pos}</option>`).join("");
+
   wrap.innerHTML = `
     <h2>Transfer Market</h2>
+    <label>Filter: <select id="transferPositionFilter" onchange="renderTransferMarket()">${tfPosOptions}</select></label>
     <table class="squad-table">
       <thead>
         <tr>
@@ -2561,7 +2629,7 @@ function renderTopScorers() {
           name: player.name,
           goals: player.goals,
           club: club.name,
-          position: player.position
+          position: formatPlayerPosition(player)
         });
       }
     });
@@ -2593,6 +2661,8 @@ function openTransferModal(playerId) {
   const modal = document.getElementById("transferModal");
 
   document.getElementById("modalPlayerName").textContent = player.name;
+  const posEl = document.getElementById("modalPosition");
+  if (posEl) posEl.textContent = formatPlayerPosition(player);
   document.getElementById("modalAge").textContent = player.age;
   document.getElementById("modalOVR").textContent = player.overall;
   document.getElementById("modalPOT").textContent = player.potential;
@@ -2649,6 +2719,8 @@ function openSellModal(player) {
   const modal = document.getElementById("transferModal");
 
   document.getElementById("modalPlayerName").textContent = player.name;
+  const posElSell = document.getElementById("modalPosition");
+  if (posElSell) posElSell.textContent = formatPlayerPosition(player);
   document.getElementById("modalAge").textContent = player.age;
   document.getElementById("modalOVR").textContent = player.overall;
   document.getElementById("modalPOT").textContent = player.potential;
@@ -2764,18 +2836,20 @@ function openClubModal(clubId) {
     <h3 class="section-title">Starting XI</h3>
 
     <div class="starting-grid">
-      ${club.squad
-        .filter(p => p.isStarter)
-        .sort((a,b)=>{
-          const order = { GK:0, DEF:1, MID:2, ATT:3 };
-          return order[a.position] - order[b.position];
-        })
-        .map(p => `
+      ${(function() {
+        const slots = formationSlots[club.tactics?.formation] || formationSlots["4-3-3"];
+        const starters = club.squad.filter(p => p.isStarter);
+        return starters.sort((a,b) => {
+          const ia = slots.indexOf(a.matchPosition || a.primaryPosition || a.position);
+          const ib = slots.indexOf(b.matchPosition || b.primaryPosition || b.position);
+          return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+        });
+      })().map(p => `
           <div class="starter-card" 
                onclick="openAIPlayerModal('${club.id}','${p.id}')">
 
             <div class="starter-left">
-              <span class="pos-badge ${p.position}">${p.position}</span>
+              <span class="pos-badge ${p.matchPosition || p.primaryPosition || p.position}">${p.matchPosition || formatPlayerPosition(p)}</span>
               <span class="starter-name">${p.name}</span>
             </div>
 
@@ -2803,6 +2877,8 @@ function openAIPlayerModal(clubId, playerId) {
   const price = getAIPlayerAskingPrice(player, sellingClub);
 
   document.getElementById("modalPlayerName").textContent = player.name;
+  const posElAI = document.getElementById("modalPosition");
+  if (posElAI) posElAI.textContent = formatPlayerPosition(player);
   document.getElementById("modalAge").textContent = player.age;
   document.getElementById("modalOVR").textContent = player.overall;
   document.getElementById("modalPOT").textContent = player.potential;
@@ -2835,13 +2911,35 @@ function buyFromAIClub(player, sellingClub, price) {
   myClub.budget -= price;
   myClub.squad.push(player);
 
-  // remove from selling club
   sellingClub.squad = sellingClub.squad.filter(p => p.id !== player.id);
+
+  tryAIFillFromMarket(sellingClub, player);
 
   showNotification(`Signed ${player.name} from ${sellingClub.name}`);
 
   renderTeamCard();
   renderSquad();
+}
+
+function tryAIFillFromMarket(club, soldPlayer) {
+  const market = UL.game.transferMarket?.players;
+  if (!market || !market.length) return;
+  const needPos = soldPlayer.primaryPosition || soldPlayer.position;
+  let candidates = market.filter(p => (p.primaryPosition || p.position) === needPos || p.secondaryPosition === needPos);
+  if (candidates.length === 0) {
+    const sector = getSector(needPos);
+    candidates = market.filter(p => getSector(p.primaryPosition || p.position) === sector);
+  }
+  if (candidates.length === 0) return;
+  candidates.sort((a, b) => (b.overall || 0) - (a.overall || 0));
+  const buy = candidates.find(p => p.value <= club.budget);
+  if (!buy) return;
+  const idx = market.findIndex(p => p.id === buy.id);
+  if (idx === -1) return;
+  market.splice(idx, 1);
+  club.budget -= buy.value;
+  club.squad.push(buy);
+  UL.game.transferMarket.history.push({ type: "OUT", name: buy.name, value: buy.value });
 }
 
 function closeClubModal() {
@@ -2873,17 +2971,14 @@ function renewContract(playerId) {
 }
 
 /**********************
-//STARTING XI BUILDER (NO MORE 6 DEF/2 GK SHIT)
+//STARTING XI BUILDER (slot-based: 11 slots per formation, matchPosition set)
 //**********************/
 function buildStartingXI(club) {
   ensureClubTactics(club);
+  club.squad.forEach(ensurePlayerPositions);
+  club.squad.forEach(p => { p.isStarter = false; p.matchPosition = null; });
 
-  // reset
-  club.squad.forEach(p => (p.isStarter = false));
-
-  const req = formations[club.tactics.formation] || formations["4-3-3"];
-
-  // pick by position, more weight on rating (overall), less on form & stamina
+  const slots = formationSlots[club.tactics.formation] || formationSlots["4-3-3"];
   const score = (p) => {
     const ovr = p.overall ?? 0;
     const form = p.form ?? 50;
@@ -2891,21 +2986,32 @@ function buildStartingXI(club) {
     return ovr * 0.88 + form * 0.08 + stamina * 0.04;
   };
 
-  Object.entries(req).forEach(([pos, count]) => {
-    club.squad
-      .filter(p => p.position === pos && p.suspendedMatches === 0 && !p.injured)
-      .sort((a, b) => score(b) - score(a))
-      .slice(0, count)
-      .forEach(p => (p.isStarter = true));
-  });
+  const available = () => club.squad.filter(p => !p.isStarter && p.suspendedMatches === 0 && !p.injured);
 
-  // safety: if you ever have missing positions (e.g. no GK), fill from best remaining
+  for (const slot of slots) {
+    const prim = (p) => (p.primaryPosition || p.position) === slot;
+    const sec = (p) => (p.secondaryPosition || "") === slot;
+    let candidates = available().filter(p => prim(p) || sec(p));
+    if (candidates.length === 0) {
+      const sector = getSector(slot);
+      candidates = available().filter(p => getSector(p.primaryPosition || p.position) === sector);
+    }
+    if (candidates.length === 0) candidates = available();
+    if (candidates.length === 0) continue;
+    const best = candidates.sort((a, b) => score(b) - score(a))[0];
+    best.isStarter = true;
+    best.matchPosition = slot;
+  }
+
   const starters = club.squad.filter(p => p.isStarter);
   if (starters.length < 11) {
-    const remaining = club.squad
-      .filter(p => !p.isStarter)
-      .sort((a, b) => score(b) - score(a));
-    remaining.slice(0, 11 - starters.length).forEach(p => (p.isStarter = true));
+    const remaining = available().sort((a, b) => score(b) - score(a));
+    const filledSlots = new Set(starters.map(p => p.matchPosition).filter(Boolean));
+    const unfilledSlots = slots.filter(s => !filledSlots.has(s));
+    remaining.slice(0, 11 - starters.length).forEach((p, i) => {
+      p.isStarter = true;
+      p.matchPosition = unfilledSlots[i] || slots[starters.length + i] || "CM";
+    });
   }
 }
 
