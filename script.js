@@ -1430,7 +1430,7 @@ function renderSquad() {
   const posOptions = ["All", ...POSITIONS].map(pos => `<option value="${pos}" ${filterVal === pos ? "selected" : ""}>${pos}</option>`).join("");
 
   wrap.innerHTML = `
-    <label>Filter by position: <select id="squadPositionFilter" onchange="renderSquad()">${posOptions}</select></label>
+    <label>Filter by position: <select id="squadPositionFilter">${posOptions}</select></label>
     <table class="squad-table">
       <thead>
         <tr>
@@ -1449,6 +1449,8 @@ function renderSquad() {
       <tbody>${rows}</tbody>
     </table>
   `;
+  const squadFilterEl = document.getElementById("squadPositionFilter");
+  if (squadFilterEl) squadFilterEl.addEventListener("change", () => renderSquad());
 }
 
 // 🔥 CLEAN NAVIGATION SYSTEM
@@ -2549,7 +2551,7 @@ function renderTransferMarket() {
 
   wrap.innerHTML = `
     <h2>Transfer Market</h2>
-    <label>Filter: <select id="transferPositionFilter" onchange="renderTransferMarket()">${tfPosOptions}</select></label>
+    <label>Filter: <select id="transferPositionFilter">${tfPosOptions}</select></label>
     <table class="squad-table">
       <thead>
         <tr>
@@ -2566,6 +2568,9 @@ function renderTransferMarket() {
 
     <div id="transferHistory"></div>
   `;
+
+  const transferFilterEl = document.getElementById("transferPositionFilter");
+  if (transferFilterEl) transferFilterEl.addEventListener("change", () => renderTransferMarket());
 
   renderTransferHistory();
 }
