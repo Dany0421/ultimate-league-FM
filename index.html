@@ -16,6 +16,7 @@
             <button class="nav-btn" data-page="squad">Squad</button>
             <button class="nav-btn" data-page="transfers">Transfers</button>
             <button class="nav-btn" data-page="league">League</button>
+            <button class="nav-btn" data-page="careerStats">Career Stats</button>
             <button class="nav-btn" data-page="tactics">Tactics</button>
         </div>
     </nav>
@@ -86,6 +87,12 @@
 
         <section id="league" class="page">
             <h1>League Table</h1>
+        </section>
+
+        <section id="careerStats" class="page">
+            <h1>Career Stats</h1>
+            <p class="career-stats-intro">Your results at each club by season.</p>
+            <div id="careerStatsTableWrap" class="table-wrap"></div>
         </section>
 
         <section id="cup" class="page">
@@ -250,6 +257,16 @@
       <div class="modal-content">
         <span class="close-btn" onclick="closeClubModal()">×</span>
         <div id="clubModalBody"></div>
+      </div>
+    </div>
+
+    <!-- Job Offers Modal -->
+    <div id="jobOffersModal" class="modal hidden">
+      <div class="modal-content">
+        <span id="jobOffersModalClose" class="close-btn">×</span>
+        <h2>Job Offers</h2>
+        <p class="job-offers-intro">Other clubs want you as manager.</p>
+        <div id="jobOffersList" class="job-offers-list"></div>
       </div>
     </div>
 

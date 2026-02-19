@@ -86,6 +86,11 @@ const CONFIG = {
   AI_TRANSFER_MAX_SELLS_PER_WINDOW: 1,
   AI_BUY_RATING_CAP_OVER_CLUB: 2,
   AI_SELL_ONLY_IF_MARKET_BELOW: 15,
+  // Job offers: every 10 matchdays (few offers), more at start of new season
+  JOB_OFFER_MATCHDAY_INTERVAL: 10,
+  JOB_OFFERS_COUNT_MID_SEASON: 2,
+  JOB_OFFERS_COUNT_SEASON_END: 5,
+  JOB_OFFERS_AT_SEASON_END: true,
 };
 
 /** === TRAINING PLANS === **/
@@ -533,7 +538,8 @@ function initWorld() {
       players: [],
      history: []
     },
-    activeCompetition: "league" // default to league, can be changed later
+    activeCompetition: "league", // default to league, can be changed later
+    careerStats: [] // { season, team, division, leaguePosition, cupResult, goalsFor, goalsAgainst }
   };
 }
 
@@ -620,6 +626,123 @@ function selectClub(clubId) {
 }
 
 window.selectClub = selectClub
+
+/**********************
+ * JOB OFFERS
+ **********************/
+
+function getJobOffers(count) {
+  const myId = UL.game.selectedClubId;
+  const myClub = getClubById(myId);
+  if (!myClub || count <= 0) return [];
+
+  const pool = UL.game.clubs.filter(c => c.id !== myId);
+  const myRating = myClub.rating || 75;
+  const higher = pool.filter(c => (c.rating || 75) > myRating);
+  const lower = pool.filter(c => (c.rating || 75) < myRating);
+  const same = pool.filter(c => (c.rating || 75) === myRating);
+
+  const half = Math.ceil(count / 2);
+  const fromHigher = shuffle([...higher]).slice(0, half);
+  const fromLower = shuffle([...lower]).slice(0, count - fromHigher.length);
+  const need = count - fromHigher.length - fromLower.length;
+  const fromSame = need > 0 ? shuffle([...same]).slice(0, need) : [];
+
+  const combined = [...fromHigher, ...fromLower, ...fromSame];
+  return shuffle(combined).slice(0, count);
+}
+
+function showJobOffersModal(offers) {
+  if (!offers || offers.length === 0) return;
+
+  const modal = document.getElementById("jobOffersModal");
+  const listEl = document.getElementById("jobOffersList");
+  if (!modal || !listEl) return;
+
+  listEl.innerHTML = offers.map(club => {
+    const div = club.division === 1 ? "D1" : "D2";
+    return `
+      <div class="job-offer-row" data-club-id="${club.id}">
+        <div class="job-offer-info">
+          <strong>${club.name}</strong>
+          <span>Rating ${club.rating} · ${div}</span>
+        </div>
+        <div class="job-offer-actions">
+          <button class="btn-confirm job-offer-accept" data-club-id="${club.id}">Accept</button>
+          <button class="btn-cancel job-offer-decline" data-club-id="${club.id}">Decline</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  modal.classList.remove("hidden");
+
+  const closeJobOffers = () => modal.classList.add("hidden");
+
+  listEl.querySelectorAll(".job-offer-accept").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const clubId = btn.getAttribute("data-club-id");
+      const club = getClubById(clubId);
+      closeJobOffers();
+      selectClub(clubId);
+      showNotification(`You accepted the offer from ${club.name}`);
+    });
+  });
+
+  listEl.querySelectorAll(".job-offer-decline").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const row = btn.closest(".job-offer-row");
+      if (row) row.remove();
+      if (listEl.children.length === 0) closeJobOffers();
+    });
+  });
+
+  const closeBtn = document.getElementById("jobOffersModalClose");
+  if (closeBtn) closeBtn.onclick = closeJobOffers;
+}
+
+function renderCareerStats() {
+  const wrap = document.getElementById("careerStatsTableWrap");
+  if (!wrap) return;
+
+  const stats = UL.game.careerStats || [];
+  if (stats.length === 0) {
+    wrap.innerHTML = "<p class=\"career-stats-empty\">No seasons completed yet. Finish a season and click Start Next Season to see your career history here.</p>";
+    return;
+  }
+
+  const rows = stats.map(entry => {
+    const posText = entry.leaguePosition != null ? `D${entry.division} ${entry.leaguePosition}` : "-";
+    return `
+      <tr>
+        <td>${entry.season}</td>
+        <td>${entry.team}</td>
+        <td>${entry.division}</td>
+        <td>${posText}</td>
+        <td>${entry.cupResult}</td>
+        <td>${entry.goalsFor}</td>
+        <td>${entry.goalsAgainst}</td>
+      </tr>
+    `;
+  }).join("");
+
+  wrap.innerHTML = `
+    <table class="league-table career-stats-table">
+      <thead>
+        <tr>
+          <th>Season</th>
+          <th>Team</th>
+          <th>Div</th>
+          <th>League Pos</th>
+          <th>Cup</th>
+          <th>GF</th>
+          <th>GA</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
 
 /**********************
  * LEAGUE ENGINE v1
@@ -1370,6 +1493,11 @@ document.addEventListener("DOMContentLoaded", () => {
       const pages = document.querySelectorAll(".page");
       pages.forEach(p => p.classList.remove("active"));
       document.getElementById("dashboard").classList.add("active");
+
+      if (UL.game.activeCompetition === "league" && CONFIG.JOB_OFFER_MATCHDAY_INTERVAL > 0 && md % CONFIG.JOB_OFFER_MATCHDAY_INTERVAL === 0) {
+        const offers = getJobOffers(CONFIG.JOB_OFFERS_COUNT_MID_SEASON);
+        if (offers.length) setTimeout(() => showJobOffersModal(offers), 100);
+      }
     });
   }
 });
@@ -1619,6 +1747,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (target === "squad") renderSquad();
       if (target === "tactics") safeInitTacticsV2();
       if (target === "transfers") renderTransferMarket();
+      if (target === "careerStats") renderCareerStats();
 
     });
   });
@@ -2517,9 +2646,42 @@ function renderCupFinalStats() {
     </div>
   `;
 
-  // ✅ botão: agora sim faz reset + nova season
+  // Start next season: record career stats for the season that just ended, then endSeason, then dashboard; job offers at start of new season
   document.getElementById("startNextSeasonBtn").addEventListener("click", () => {
-    endSeason(); // usa a tua função atual
+    const season = UL.game.lastSeasonSummary;
+    const cupSum = UL.game.lastCupSummary;
+    const myId = UL.game.selectedClubId;
+    if (season && myId) {
+      const myClub = getClubById(myId);
+      const myDivision = myClub ? myClub.division : 1;
+      const finalD1 = season.finalTableD1 || [];
+      const finalD2 = season.finalTableD2 || [];
+      const myTable = myDivision === 1 ? finalD1 : finalD2;
+      const myRowIndex = myTable.findIndex(r => r.clubId === myId);
+      const myRow = myRowIndex >= 0 ? myTable[myRowIndex] : null;
+      let cupResult = "Did not qualify";
+      if (cupSum && cupSum.history?.length) {
+        if (cupSum.winnerId === myId) cupResult = "Champion";
+        else {
+          let lastRound = null;
+          cupSum.history.forEach(h => {
+            if (h.matches?.some(m => m.homeId === myId || m.awayId === myId)) lastRound = h.round;
+          });
+          if (lastRound) cupResult = `Eliminated in ${lastRound}`;
+        }
+      }
+      UL.game.careerStats.push({
+        season: UL.game.season,
+        team: myClub ? myClub.name : "Unknown",
+        division: myDivision,
+        leaguePosition: myRowIndex >= 0 ? myRowIndex + 1 : null,
+        cupResult,
+        goalsFor: myRow ? myRow.goalsFor : 0,
+        goalsAgainst: myRow ? myRow.goalsAgainst : 0
+      });
+    }
+
+    endSeason();
 
     document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
     document.getElementById("dashboard").classList.add("active");
@@ -2529,6 +2691,13 @@ function renderCupFinalStats() {
     rendertop8Table();
     renderTeamCard();
     updateDashboardNextMatchInfo();
+
+    if (CONFIG.JOB_OFFERS_AT_SEASON_END) {
+      setTimeout(() => {
+        const offers = getJobOffers(CONFIG.JOB_OFFERS_COUNT_SEASON_END);
+        if (offers.length) showJobOffersModal(offers);
+      }, 150);
+    }
   });
 }
 

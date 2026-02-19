@@ -200,6 +200,18 @@ main {
   margin-top: 0;
 }
 
+.career-stats-intro {
+  color: #aaa;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.career-stats-empty {
+  color: #888;
+  font-style: italic;
+  padding: 24px 0;
+}
+
 .table-wrap{
   margin-top: 20px;
   background:#161616;
@@ -686,6 +698,65 @@ main {
 
 .modal-content button:hover {
   background: #ff5a4f;
+}
+
+/* Job Offers Modal */
+.job-offers-intro {
+  margin-bottom: 14px;
+  color: #aaa;
+  font-size: 14px;
+}
+
+.job-offers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.job-offer-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: rgba(255,255,255,0.05);
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+.job-offer-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.job-offer-info strong {
+  color: #fff;
+}
+
+.job-offer-info span {
+  font-size: 12px;
+  color: #888;
+}
+
+.job-offer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.job-offer-actions .btn-confirm {
+  background: #00aa55;
+}
+
+.job-offer-actions .btn-confirm:hover {
+  background: #00cc66;
+}
+
+.job-offer-actions .btn-cancel {
+  background: #444;
+}
+
+.job-offer-actions .btn-cancel:hover {
+  background: #555;
 }
 
 /* ANIMAÇÃO */
