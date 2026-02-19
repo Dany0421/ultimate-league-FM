@@ -3396,6 +3396,8 @@ function lockInitialFormation(club) {
   window.closeClubModal = closeClubModal;
   window.buyFromAIClub = buyFromAIClub;
   window.renewContract = renewContract;
+  window.renderSquad = renderSquad;
+  window.renderTransferMarket = renderTransferMarket;
 
   console.log("✅ Modal & transfer bindings safely attached.");
 
