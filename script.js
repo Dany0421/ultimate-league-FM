@@ -2573,8 +2573,6 @@ function renderTransferMarket() {
       </thead>
       <tbody>${rows}</tbody>
     </table>
-
-    <div id="transferHistory"></div>
   `;
 
   const transferFilterEl = document.getElementById("transferPositionFilter");
@@ -2583,16 +2581,16 @@ function renderTransferMarket() {
   renderTransferHistory();
 }
 
-// 6️⃣ Transfer history
+// 6️⃣ Transfer history (uses the single #transferHistory from index.html)
 function renderTransferHistory() {
 
   const container = document.getElementById("transferHistory");
   if (!container) return;
 
-  const history = UL.game.transferMarket.history;
+  const history = UL.game.transferMarket && UL.game.transferMarket.history ? UL.game.transferMarket.history : [];
 
   if (!history.length) {
-    container.innerHTML = "<h3>No transfers this season</h3>";
+    container.innerHTML = "<p class=\"transfer-history-empty\">No transfers this season</p>";
     return;
   }
 
@@ -2603,15 +2601,12 @@ function renderTransferHistory() {
     return c ? c.name : "—";
   };
 
-  container.innerHTML = `
-    <h3>Season Transfer History</h3>
-    ${history.map(h => `
-      <div class="transfer-row ${h.type}">
-        <span>[${clubLabel(h)}]</span>
-        <span>${h.type === "IN" ? "IN" : "OUT"}: ${h.name} €${(h.value/1000000).toFixed(1)}M</span>
-      </div>
-    `).join("")}
-  `;
+  container.innerHTML = history.map(h => `
+    <div class="transfer-row ${h.type}">
+      <span>[${clubLabel(h)}]</span>
+      <span>${h.type === "IN" ? "IN" : "OUT"}: ${h.name} €${(h.value/1000000).toFixed(1)}M</span>
+    </div>
+  `).join("");
 }
 
 function showNotification(message) {
@@ -2944,10 +2939,17 @@ function buyFromAIClub(player, sellingClub, price) {
 
   renderTeamCard();
   renderSquad();
+  if (document.getElementById("transferHistory")) renderTransferHistory();
 }
 
 function tryAIFillFromMarket(club, soldPlayer) {
-  const market = UL.game.transferMarket?.players;
+  if (!UL.game.transferMarket) {
+    UL.game.transferMarket = { players: [], history: [] };
+  }
+  if (!UL.game.transferMarket.players || UL.game.transferMarket.players.length === 0) {
+    generateTransferMarket();
+  }
+  const market = UL.game.transferMarket.players;
   if (!market || !market.length) return;
   const needPos = soldPlayer.primaryPosition || soldPlayer.position;
   let candidates = market.filter(p => (p.primaryPosition || p.position) === needPos || p.secondaryPosition === needPos);
@@ -2965,6 +2967,7 @@ function tryAIFillFromMarket(club, soldPlayer) {
   club.budget -= buy.value;
   club.squad.push(buy);
   buildStartingXI(club);
+  if (!Array.isArray(UL.game.transferMarket.history)) UL.game.transferMarket.history = [];
   UL.game.transferMarket.history.push({
     type: "IN",
     clubId: club.id,
@@ -2975,7 +2978,11 @@ function tryAIFillFromMarket(club, soldPlayer) {
 }
 
 function runAITransferWindow() {
-  const market = UL.game.transferMarket?.players;
+  if (!UL.game.transferMarket) {
+    UL.game.transferMarket = { players: [], history: [] };
+    generateTransferMarket();
+  }
+  const market = UL.game.transferMarket.players;
   if (!market) return;
 
   const aiClubs = UL.game.clubs
