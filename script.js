@@ -3401,10 +3401,12 @@ function lockInitialFormation(club) {
   window.closeClubModal = closeClubModal;
   window.buyFromAIClub = buyFromAIClub;
   window.renewContract = renewContract;
-  window.renderSquad = renderSquad;
-  window.renderTransferMarket = renderTransferMarket;
 
   console.log("✅ Modal & transfer bindings safely attached.");
 
 })();
+
+// Expose for any global/inline use (e.g. GitHub Pages) — must run after functions exist
+if (typeof renderSquad !== "undefined") window.renderSquad = renderSquad;
+if (typeof renderTransferMarket !== "undefined") window.renderTransferMarket = renderTransferMarket;
 
