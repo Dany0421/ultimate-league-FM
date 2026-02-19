@@ -88,6 +88,21 @@ const CONFIG = {
   AI_SELL_ONLY_IF_MARKET_BELOW: 15,
 };
 
+/** === TRAINING PLANS === **/
+const TRAINING_PLANS = ["attacking", "tactical", "fitness", "defensive", "recovery"];
+const TRAINING_INTENSITY = ["low", "medium", "high"];
+const TRAINING_INTENSITY_MULTIPLIER = { low: 0.7, medium: 1.0, high: 1.3 };
+const TRAINING_FITNESS_RECOVERY = { low: 2, medium: 3, high: 4 };
+const TRAINING_INJURY_INTENSITY = { low: 0.9, medium: 1.0, high: 1.2 };
+
+function trainingAgeFactor(player) {
+  const age = player.age ?? 25;
+  if (age <= 22) return 1.0;
+  if (age <= 27) return 0.75;
+  if (age <= 31) return 0.5;
+  return 0.25;
+}
+
 /** === CLUB LIST (Season 1) === **/
 const CLUB_PRESETS = [
   // Elite
@@ -454,7 +469,9 @@ function initWorld() {
         DEF: 0,
         MID: 0,
         ATT: 0
-      }
+      },
+      trainingPlan: TRAINING_PLANS[randInt(0, TRAINING_PLANS.length - 1)],
+      trainingIntensity: TRAINING_INTENSITY[randInt(0, TRAINING_INTENSITY.length - 1)]
     };
 
     club.squad = generateSquad(club.rating);
@@ -654,9 +671,14 @@ function avgTeamForm(club) {
 }
 
 function clampFormUpdate(club, delta) {
+  const intensityMult = TRAINING_INTENSITY_MULTIPLIER[club.trainingIntensity] ?? 1;
   club.squad.forEach(p => {
     let d = delta;
     if (delta < 0 && (p.personality || "professional") === "professional") d = delta * 0.8;
+    if (delta < 0 && club.trainingPlan === "tactical") {
+      const reduce = 0.12 * trainingAgeFactor(p) * intensityMult;
+      d = d * (1 - reduce);
+    }
     p.form = clamp(p.form + d, 20, 95);
   });
 }
@@ -704,6 +726,14 @@ function simulateMatch(homeClub, awayClub, matchContext) {
       if (matchPos !== prim && matchPos !== sec) contribution *= OOP_PENALTY_MULTIPLIER;
       const styleBoost = (STYLE_POSITION_BOOST[club.tactics?.style] || {})[matchPos] ?? 0;
       contribution *= (1 + styleBoost);
+      const intensityMult = TRAINING_INTENSITY_MULTIPLIER[club.trainingIntensity] ?? 1;
+      const ageF = trainingAgeFactor(p);
+      if (club.trainingPlan === "attacking" && ["RW", "LW", "ST"].includes(matchPos)) {
+        contribution += 1.5 * ageF * intensityMult;
+      }
+      if (club.trainingPlan === "defensive" && ["RB", "LB", "CB", "CDM"].includes(matchPos)) {
+        contribution += 1.5 * ageF * intensityMult;
+      }
       return acc + contribution;
     }, 0);
     return total / XI.length;
@@ -807,6 +837,7 @@ function simulateMatch(homeClub, awayClub, matchContext) {
   function applyMatchInjuries(club) {
   const XI = club.squad.filter(p => p.isStarter && !p.injured);
   let injuryOccurred = false;
+  const intensityMult = TRAINING_INJURY_INTENSITY[club.trainingIntensity] ?? 1;
 
   XI.forEach(player => {
     if (injuryOccurred) return;
@@ -814,6 +845,8 @@ function simulateMatch(homeClub, awayClub, matchContext) {
     let risk = 0.002;
     if (club.tactics.tackling === "aggressive") risk += 0.006;
     if ((player.personality || "") === "injuryProne") risk *= 1.3;
+    if (club.trainingPlan === "recovery") risk *= 0.85;
+    risk *= intensityMult;
 
     if (Math.random() < risk) {
       player.injured = true;
@@ -821,6 +854,9 @@ function simulateMatch(homeClub, awayClub, matchContext) {
       if (p === "professional") player.injuryWeeks = 1;
       else if (p === "injuryProne") player.injuryWeeks = 3;
       else player.injuryWeeks = randInt(1, 3);
+      if (club.trainingPlan === "recovery" && player.injuryWeeks > 1) {
+        player.injuryWeeks = Math.max(1, player.injuryWeeks - 1);
+      }
       injuryOccurred = true;
 
       if (club.id === UL.game.selectedClubId) {
@@ -1230,6 +1266,7 @@ document.addEventListener("DOMContentLoaded", () => {
       applyWeeklyWages();
       decrementSuspensions();
       decrementInjuries();
+      applyTrainingBetweenMatchdays();
       applyMercenaryMorale();
 
       // 🔄 Transfer Market Refresh
@@ -1292,6 +1329,22 @@ function decrementInjuries() {
             showNotification(`💪 ${player.name} recovered from injury`);
           }
         }
+      }
+    });
+  });
+}
+
+function applyTrainingBetweenMatchdays() {
+  UL.game.clubs.forEach(club => {
+    const intensityMult = TRAINING_INTENSITY_MULTIPLIER[club.trainingIntensity] ?? 1;
+    club.squad.forEach(p => {
+      if (club.trainingPlan === "fitness") {
+        const add = TRAINING_FITNESS_RECOVERY[club.trainingIntensity] ?? 3;
+        p.stamina = clamp((p.stamina ?? 80) + add, 10, 100);
+      }
+      if (club.trainingPlan === "tactical") {
+        const formGain = Math.round(1 * trainingAgeFactor(p) * intensityMult);
+        if (formGain > 0) p.form = clamp((p.form ?? 50) + formGain, 20, 95);
       }
     });
   });
@@ -1390,6 +1443,7 @@ function renderTeamCard() {
         <div class="stat-label">Budget</div>
       </div>
     </div>
+    <p class="training-display">Training: ${(club.trainingPlan || "tactical").charAt(0).toUpperCase() + (club.trainingPlan || "tactical").slice(1)} (${(club.trainingIntensity || "medium").charAt(0).toUpperCase() + (club.trainingIntensity || "medium").slice(1)})</p>
   `;
 }
 
@@ -1507,6 +1561,9 @@ function safeInitTacticsV2() {
 
   ensureClubTactics(club);
 
+  if (!club.trainingPlan) club.trainingPlan = "tactical";
+  if (!club.trainingIntensity) club.trainingIntensity = "medium";
+
   const formationSelect = document.getElementById("formationSelect");
   const styleSelect = document.getElementById("styleSelect");
   const mentalitySelect = document.getElementById("mentalitySelect");
@@ -1515,6 +1572,8 @@ function safeInitTacticsV2() {
   const tempoSelect = document.getElementById("tempoSelect");
   const lineSelect = document.getElementById("lineSelect");
   const tacklingSelect = document.getElementById("tacklingSelect");
+  const trainingPlanSelect = document.getElementById("trainingPlanSelect");
+  const trainingIntensitySelect = document.getElementById("trainingIntensitySelect");
 
   if (!formationSelect || !styleSelect || !mentalitySelect || !pressingSelect || !widthSelect || !tempoSelect || !lineSelect || !tacklingSelect) {
     console.warn("Tactics v2 UI missing elements.");
@@ -1539,6 +1598,8 @@ function safeInitTacticsV2() {
   tempoSelect.value = club.tactics.tempo;
   lineSelect.value = club.tactics.line;
   tacklingSelect.value = club.tactics.tackling;
+  if (trainingPlanSelect) trainingPlanSelect.value = club.trainingPlan || "tactical";
+  if (trainingIntensitySelect) trainingIntensitySelect.value = club.trainingIntensity || "medium";
 
   // boosts (optional)
   if (club.cheatBoost) {
@@ -1568,6 +1629,10 @@ function saveTacticsV2() {
   club.tactics.tempo = document.getElementById("tempoSelect").value;
   club.tactics.line = document.getElementById("lineSelect").value;
   club.tactics.tackling = document.getElementById("tacklingSelect").value;
+  const tPlan = document.getElementById("trainingPlanSelect");
+  const tInt = document.getElementById("trainingIntensitySelect");
+  if (tPlan) club.trainingPlan = tPlan.value;
+  if (tInt) club.trainingIntensity = tInt.value;
 
   // boosts (optional)
   if (club.cheatBoost) {
