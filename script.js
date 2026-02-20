@@ -86,8 +86,8 @@ const CONFIG = {
   AI_TRANSFER_MAX_SELLS_PER_WINDOW: 1,
   AI_BUY_RATING_CAP_OVER_CLUB: 2,
   AI_SELL_ONLY_IF_MARKET_BELOW: 15,
-  // Job offers: every 10 matchdays (few offers), more at start of new season
-  JOB_OFFER_MATCHDAY_INTERVAL: 10,
+  // Job offers: mid-season at matchday 17 (halfway), 2 offers; more at start of new season
+  JOB_OFFER_MID_SEASON_MATCHDAY: 17,
   JOB_OFFERS_COUNT_MID_SEASON: 2,
   JOB_OFFERS_COUNT_SEASON_END: 5,
   JOB_OFFERS_AT_SEASON_END: true,
@@ -920,8 +920,8 @@ function simulateMatch(homeClub, awayClub, matchContext) {
   const homeOVR = calcSectorOVR(homeClub, homeXI);
   const awayOVR = calcSectorOVR(awayClub, awayXI);
 
-  let homeStrength = homeOVR * 0.7 + homeForm * 0.3 + randInt(-4, 4);
-  let awayStrength = awayOVR * 0.7 + awayForm * 0.3 + randInt(-4, 4);
+  let homeStrength = homeOVR * 0.8 + homeForm * 0.2 + randInt(-4, 4);
+  let awayStrength = awayOVR * 0.8 + awayForm * 0.2 + randInt(-4, 4);
 
   // ===== NEW TACTIC ENGINE =====
   const baseHomeStrenght = homeStrength;
@@ -1535,7 +1535,7 @@ document.addEventListener("DOMContentLoaded", () => {
       pages.forEach(p => p.classList.remove("active"));
       document.getElementById("dashboard").classList.add("active");
 
-      if (UL.game.activeCompetition === "league" && CONFIG.JOB_OFFER_MATCHDAY_INTERVAL > 0 && md % CONFIG.JOB_OFFER_MATCHDAY_INTERVAL === 0) {
+      if (UL.game.activeCompetition === "league" && md === (CONFIG.JOB_OFFER_MID_SEASON_MATCHDAY || 17)) {
         const offers = getJobOffers(CONFIG.JOB_OFFERS_COUNT_MID_SEASON);
         if (offers.length) setTimeout(() => showJobOffersModal(offers), 100);
       }
@@ -2903,12 +2903,12 @@ if (!UL.game.transferMarket) {
   };
 }
 
-// 2️⃣ Generate exactly 20 market players
+// 2️⃣ Generate exactly 30 market players
 function generateTransferMarket() {
 
   const market = [];
 
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < 30; i++) {
     const randomClub = UL.game.clubs[randInt(0, UL.game.clubs.length - 1)];
     const posKeys = Object.keys(CONFIG.POS_DISTRIBUTION);
     const randomPos = posKeys[randInt(0, posKeys.length - 1)];
