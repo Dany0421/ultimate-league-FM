@@ -97,7 +97,7 @@ const CONFIG = {
 const TRAINING_PLANS = ["attacking", "tactical", "fitness", "defensive", "recovery"];
 const TRAINING_INTENSITY = ["low", "medium", "high"];
 const TRAINING_INTENSITY_MULTIPLIER = { low: 0.7, medium: 1.0, high: 1.3 };
-const TRAINING_FITNESS_RECOVERY = { low: 2, medium: 3, high: 4 };
+const TRAINING_FITNESS_RECOVERY = { low: 4, medium: 6, high: 8 };
 const TRAINING_INJURY_INTENSITY = { low: 0.9, medium: 1.0, high: 1.2 };
 
 function trainingAgeFactor(player) {
@@ -1579,13 +1579,17 @@ function decrementInjuries() {
 }
 
 function applyTrainingBetweenMatchdays() {
+  const STAMINA_FLOOR = 25;
   UL.game.clubs.forEach(club => {
     const intensityMult = TRAINING_INTENSITY_MULTIPLIER[club.trainingIntensity] ?? 1;
     club.squad.forEach(p => {
+      // A) Base recovery for everyone: starters +3, non-starters +6 (they rest)
+      const baseRecovery = p.isStarter ? 3 : 6;
+      let add = baseRecovery;
       if (club.trainingPlan === "fitness") {
-        const add = TRAINING_FITNESS_RECOVERY[club.trainingIntensity] ?? 3;
-        p.stamina = clamp((p.stamina ?? 80) + add, 10, 100);
+        add += TRAINING_FITNESS_RECOVERY[club.trainingIntensity] ?? 6;
       }
+      p.stamina = clamp((p.stamina ?? 80) + add, STAMINA_FLOOR, 100);
       if (club.trainingPlan === "tactical") {
         const formGain = Math.round(1 * trainingAgeFactor(p) * intensityMult);
         if (formGain > 0) p.form = clamp((p.form ?? 50) + formGain, 20, 95);
@@ -3673,7 +3677,7 @@ function applyTacticStaminaDrain(club) {
   // only starters get heavy drain
   club.squad.forEach(p => {
     if (!p.isStarter) return;
-    p.stamina = clamp((p.stamina ?? 80) - drain, 10, 100);
+    p.stamina = clamp((p.stamina ?? 80) - drain, 25, 100);
 
     // form small penalty if stamina too low
     if (p.stamina < 35) p.form = clamp((p.form ?? 50) - randInt(1, 3), 20, 95);
