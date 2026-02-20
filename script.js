@@ -573,12 +573,61 @@ function initWorld() {
   };
 }
 
+/** === SAVE / LOAD CAREER === **/
+const SAVE_KEY = "ultimateLeague_save";
+
+function saveCareer() {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(UL.game));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function loadCareerFromStorage() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data || !Array.isArray(data.clubs) || !data.clubs.length || typeof data.season !== "number") return null;
+    return data;
+  } catch (e) {
+    return null;
+  }
+}
+
 /** === DEBUG: make world and expose globally === **/
 window.UL = {
   game: initWorld(),
 };
 
 console.log("✅ Ultimate League world created:", window.UL.game);
+
+document.addEventListener("DOMContentLoaded", () => {
+  const data = loadCareerFromStorage();
+  if (data) {
+    UL.game = data;
+    if (!UL.game.transferMarket) UL.game.transferMarket = { players: [], history: [] };
+    if (UL.game.selectedClubId && UL.game.league && UL.game.league.division1) {
+      const pages = document.querySelectorAll(".page");
+      pages.forEach(p => p.classList.remove("active"));
+      document.getElementById("dashboard").classList.add("active");
+      updateDashboardNextMatchInfo();
+      renderTeamCard();
+      renderLeagueTable();
+      renderTopScorers();
+      rendertop8Table();
+    }
+  }
+  const saveCareerBtn = document.getElementById("saveCareerBtn");
+  if (saveCareerBtn) {
+    saveCareerBtn.addEventListener("click", () => {
+      if (saveCareer()) showNotification("Career saved.");
+      else showNotification("Failed to save.");
+    });
+  }
+});
 
 /**********************
  * START NEW CAREER
@@ -588,6 +637,7 @@ const startBtn = document.getElementById("startGameBtn");
 
 if (startBtn) {
   startBtn.addEventListener("click", () => {
+    localStorage.removeItem(SAVE_KEY);
     UL.game = initWorld();   // 🔥 regenerate full world
     showClubSelection();
   });
@@ -653,6 +703,7 @@ function selectClub(clubId) {
   rendertop8Table();
   renderTeamCard();
 
+  saveCareer();
 }
 
 window.selectClub = selectClub
@@ -1539,6 +1590,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const offers = getJobOffers(CONFIG.JOB_OFFERS_COUNT_MID_SEASON);
         if (offers.length) setTimeout(() => showJobOffersModal(offers), 100);
       }
+      saveCareer();
     });
   }
 });
@@ -1899,6 +1951,7 @@ function saveTacticsV2() {
   buildStartingXI(club);
 
   showNotification("Tactics saved. Lineup recalibrated.");
+  saveCareer();
 }
 
 /************************************************
