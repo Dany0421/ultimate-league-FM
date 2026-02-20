@@ -1091,6 +1091,12 @@ main {
 .pos-badge.MID { background:#3a3f58; }
 .pos-badge.ATT { background:#4b2e83; }
 
+.starter-num {
+  font-weight: 600;
+  color: #00ff88;
+  min-width: 1.2em;
+}
+
 .starter-name {
   font-weight: 500;
 }

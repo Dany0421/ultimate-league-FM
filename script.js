@@ -307,6 +307,7 @@ function generatePlayer(position, clubRating, role = "normal") {
     yellowCards: 0,
     injured: false,
     injuryWeeks: 0,
+    shirtNumber: undefined, // assigned in generateSquad or when joining club
   };
 }
 
@@ -378,7 +379,36 @@ function generateSquad(clubRating) {
 
   best11.forEach(p => p.isStarter = true);
 
+  assignSquadNumbers(squad);
   return squad;
+}
+
+function getNextShirtNumber(club) {
+  const used = new Set((club.squad || []).map(p => p.shirtNumber).filter(n => n != null && n >= 1 && n <= 99));
+  for (let n = 1; n <= 99; n++) if (!used.has(n)) return n;
+  return 99;
+}
+
+function assignSquadNumbers(squad) {
+  const starters = squad.filter(p => p.isStarter);
+  const rest = squad.filter(p => !p.isStarter);
+  const used = new Set();
+  let next = 1;
+  starters.forEach(p => {
+    p.shirtNumber = next;
+    used.add(next);
+    next++;
+  });
+  next = 12;
+  rest.forEach(p => {
+    while (used.has(next) && next <= 99) next++;
+    if (next > 99) {
+      for (let i = 1; i <= 99; i++) if (!used.has(i)) { next = i; break; }
+    }
+    p.shirtNumber = next;
+    used.add(next);
+    next++;
+  });
 }
 
 /** === TIER (dynamic later; initial from rating) === **/
@@ -386,8 +416,8 @@ function initialTierFromRating(rating) {
   if (rating >= 87) return "Elite";
   if (rating >= 84) return "Strong";
   if (rating >= 81) return "Competitive";
-  if (rating >= 78) return "Mid";
-  return "Underdog";
+  if (rating >= 76) return "Mid";
+  return "Underdog"; // 75 and below
 }
 
 /** Tier ladder for AI Rebuild (bottom 3 get tier-above tactics). */
@@ -839,14 +869,15 @@ function applyStreakBonus(standing) {
 }
 
 
-/** Match context for personality effects: cupRound (Semi Finals/Final), league matchday. */
+/** Match context for personality effects: cupRound, league matchday, top-4 clash (per division). */
 function personalityMatchModifier(player, matchContext) {
   if (!matchContext) return 0;
   const ctx = matchContext;
   const cupBigGame = ctx.cupRound === "Semi Finals" || ctx.cupRound === "Final";
   const decisiveMatchday = ctx.leagueMatchday === ctx.totalLeagueMatchdays && ctx.totalLeagueMatchdays === 34;
-  const isBigGameForBGP = cupBigGame || (decisiveMatchday && (player.personality || "") === "bigGamePlayer");
-  const isBigGame = cupBigGame; // Choker only in cup semi/final
+  const top4Clash = !!ctx.isTop4Clash;
+  const isBigGameForBGP = cupBigGame || (decisiveMatchday && (player.personality || "") === "bigGamePlayer") || top4Clash;
+  const isBigGame = cupBigGame || top4Clash; // Choker in cup semi/final or top-4 clash
 
   const p = player.personality || "professional";
   if (p === "bigGamePlayer" && isBigGameForBGP) return 3;
@@ -1240,10 +1271,20 @@ function simulateOneDivisionMatchday(divKey) {
   const matchday = div.fixtures[idx];
   if (!matchday) return null;
 
+  const sortedStandings = [...div.standings].sort((a, b) => {
+    if (b.points !== a.points) return b.points - a.points;
+    const gdA = a.goalsFor - a.goalsAgainst;
+    const gdB = b.goalsFor - b.goalsAgainst;
+    if (gdB !== gdA) return gdB - gdA;
+    return b.goalsFor - a.goalsFor;
+  });
+  const top4Ids = new Set(sortedStandings.slice(0, 4).map(s => s.clubId));
+
   const results = matchday.map(m => {
     const homeClub = getClubById(m.homeId);
     const awayClub = getClubById(m.awayId);
-    const matchContext = { cupRound: null, leagueMatchday: div.currentMatchday, totalLeagueMatchdays: div.fixtures.length, isCup: false };
+    const isTop4Clash = top4Ids.has(m.homeId) && top4Ids.has(m.awayId);
+    const matchContext = { cupRound: null, leagueMatchday: div.currentMatchday, totalLeagueMatchdays: div.fixtures.length, isCup: false, isTop4Clash };
     const sim = simulateMatch(homeClub, awayClub, matchContext);
 
     const { home: homeStanding, away: awayStanding } =
@@ -1608,11 +1649,7 @@ function renderTeamCard() {
   const rating = club.rating || 85;
   const position = div.standings.indexOf(standing) + 1;
 
-  const tier =
-    rating >= 90 ? "Elite" :
-    rating >= 85 ? "Strong" :
-    rating >= 80 ? "Competitive" :
-    "Underdog";
+  const tier = club.tier || initialTierFromRating(rating);
 
   const record = `${standing.wins}W - ${standing.draws}D - ${standing.losses}L`;
   const gd = standing.goalsFor - standing.goalsAgainst;
@@ -1660,6 +1697,10 @@ function renderSquad() {
   const club = getClubById(myId);
   if (!club) return;
 
+  if (club.squad.some(p => p.shirtNumber == null)) {
+    assignSquadNumbers(club.squad);
+  }
+
   let wrap = document.getElementById("squadTableWrap");
   if (!wrap) {
     wrap = document.createElement("div");
@@ -1673,6 +1714,7 @@ function renderSquad() {
 
   const rows = filtered.map(p => `
     <tr class="${p.isStarter ? 'starter-row' : ''}" onclick="openPlayerModal('${p.id}')">
+      <td class="shirt-num">${p.shirtNumber != null ? p.shirtNumber : "-"}</td>
       <td>
       <img 
         class="flag" 
@@ -1701,6 +1743,7 @@ function renderSquad() {
     <table class="squad-table">
       <thead>
         <tr>
+          <th>No.</th>
           <th>Name</th>
           <th>Pos</th>
           <th>Age</th>
@@ -2037,7 +2080,9 @@ function applyAIRebuildMode(finalTable) {
       const pos = victim.primaryPosition || victim.position;
       const idx = club.squad.indexOf(victim);
       club.squad.splice(idx, 1);
-      club.squad.push(generatePlayer(pos, club.rating, "prospect"));
+      const newPlayer = generatePlayer(pos, club.rating, "prospect");
+      club.squad.push(newPlayer);
+      newPlayer.shirtNumber = getNextShirtNumber(club);
     }
 
     // Tactical reset: use tier above next season (stored for tactics loop)
@@ -2460,7 +2505,9 @@ function applyPlayerAging() {
     while (club.squad.length < 20) {
       const posKeys = Object.keys(CONFIG.POS_DISTRIBUTION);
       const randomPos = posKeys[randInt(0, posKeys.length - 1)];
-      club.squad.push(generatePlayer(randomPos, club.rating));
+      const newPlayer = generatePlayer(randomPos, club.rating);
+      club.squad.push(newPlayer);
+      newPlayer.shirtNumber = getNextShirtNumber(club);
     }
 
   });
@@ -2772,9 +2819,36 @@ function openPlayerModal(playerId) {
       <span>${getPersonalityDisplayName(player.personality || "professional")}</span>
     </div>
 
+    <div class="stat-row">
+      <span>Shirt number</span>
+      <input type="number" id="playerShirtNumberInput" min="1" max="99" value="${player.shirtNumber ?? ""}" placeholder="1-99" style="width:60px;" />
+    </div>
+    <button type="button" id="saveShirtNumberBtn" data-player-id="${player.id}">Save number</button>
+
     <button onclick="openSellModalById('${player.id}')">Sell Player</button>
     <button onclick="renewContract('${player.id}')">Renew Contract</button>
   `;
+
+  const saveBtn = document.getElementById("saveShirtNumberBtn");
+  const inputEl = document.getElementById("playerShirtNumberInput");
+  if (saveBtn && inputEl) {
+    saveBtn.addEventListener("click", () => {
+      let num = parseInt(inputEl.value, 10);
+      if (isNaN(num) || num < 1 || num > 99) {
+        showNotification("Shirt number must be between 1 and 99.");
+        return;
+      }
+      const myClub = getClubById(UL.game.selectedClubId);
+      const otherWithSame = myClub.squad.find(p => p.id !== player.id && p.shirtNumber === num);
+      if (otherWithSame) {
+        showNotification(`Number ${num} is already used by ${otherWithSame.name}.`);
+        return;
+      }
+      player.shirtNumber = num;
+      showNotification(`Shirt number set to ${num}.`);
+      renderSquad();
+    });
+  }
 
   modal.classList.remove("hidden");
 }
@@ -3053,6 +3127,7 @@ function confirmBuyPlayer(player) {
 
   club.budget -= player.value;
   club.squad.push(player);
+  player.shirtNumber = getNextShirtNumber(club);
 
   market.splice(index, 1);
 
@@ -3208,6 +3283,7 @@ function openClubModal(clubId) {
 
             <div class="starter-left">
               <span class="pos-badge ${p.matchPosition || p.primaryPosition || p.position}">${p.matchPosition || formatPlayerPosition(p)}</span>
+              ${p.shirtNumber != null ? `<span class="starter-num">${p.shirtNumber}</span>` : ""}
               <span class="starter-name">${p.name}</span>
             </div>
 
@@ -3268,6 +3344,7 @@ function buyFromAIClub(player, sellingClub, price) {
 
   myClub.budget -= price;
   myClub.squad.push(player);
+  player.shirtNumber = getNextShirtNumber(myClub);
 
   sellingClub.squad = sellingClub.squad.filter(p => p.id !== player.id);
 
@@ -3304,6 +3381,7 @@ function tryAIFillFromMarket(club, soldPlayer) {
   market.splice(idx, 1);
   club.budget -= buy.value;
   club.squad.push(buy);
+  buy.shirtNumber = getNextShirtNumber(club);
   buildStartingXI(club);
   if (!Array.isArray(UL.game.transferMarket.history)) UL.game.transferMarket.history = [];
   UL.game.transferMarket.history.push({
@@ -3370,6 +3448,7 @@ function runAITransferWindow() {
     market.splice(idx, 1);
     club.budget -= buy.value;
     club.squad.push(buy);
+    buy.shirtNumber = getNextShirtNumber(club);
     buildStartingXI(club);
     UL.game.transferMarket.history.push({
       type: "IN",
