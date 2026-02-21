@@ -75,17 +75,18 @@ const CONFIG = {
   SQUAD_SIZE: 20,
   JOB_SECURITY: 0.97, // quase impossível seres despedido (fase inicial)
   POS_DISTRIBUTION: { GK: 2, RB: 2, LB: 2, CB: 3, CDM: 2, CM: 3, CAM: 2, LM: 1, RM: 1, RW: 2, LW: 2, ST: 2 },
-  MARKET_REFRESH_INTERVAL: 5,
+  MARKET_REFRESH_INTERVAL: 3,
+  MARKET_PLAYERS_PER_REFRESH: 45,
   // AI Rebuild Mode (bottom 3 each season)
   REBUILD_BUDGET_INJECTION: 8_000_000,
   REBUILD_PROSPECTS_COUNT: 1,
   // Neo Egoist Cup: underdog strength bonus (lower-rated team gets boost)
   CUP_UNDERDOG_BOOST: 0.8,
   // Dynamic AI transfers (per market-refresh window)
-  AI_TRANSFER_MAX_BUYS_PER_WINDOW: 2,
-  AI_TRANSFER_MAX_SELLS_PER_WINDOW: 1,
+  AI_TRANSFER_MAX_BUYS_PER_WINDOW: 3,
+  AI_TRANSFER_MAX_SELLS_PER_WINDOW: 2,
   AI_BUY_RATING_CAP_OVER_CLUB: 2,
-  AI_SELL_ONLY_IF_MARKET_BELOW: 15,
+  AI_SELL_ONLY_IF_MARKET_BELOW: 28,
   // Job offers: mid-season at matchday 17 (halfway), 2 offers; more at start of new season
   JOB_OFFER_MID_SEASON_MATCHDAY: 17,
   JOB_OFFERS_COUNT_MID_SEASON: 2,
@@ -2964,12 +2965,13 @@ if (!UL.game.transferMarket) {
   };
 }
 
-// 2️⃣ Generate exactly 30 market players
+// 2️⃣ Generate market players (CONFIG.MARKET_PLAYERS_PER_REFRESH)
 function generateTransferMarket() {
 
   const market = [];
+  const count = CONFIG.MARKET_PLAYERS_PER_REFRESH ?? 30;
 
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < count; i++) {
     const randomClub = UL.game.clubs[randInt(0, UL.game.clubs.length - 1)];
     const posKeys = Object.keys(CONFIG.POS_DISTRIBUTION);
     const randomPos = posKeys[randInt(0, posKeys.length - 1)];
@@ -3531,25 +3533,28 @@ function runAITransferWindow() {
     }
   }
 
-  // Phase 2: all clubs sell, max 1 per club (only if squad 20 and market below cap)
+  // Phase 2: all clubs sell, up to maxSells per club (if squad > 20 and market below cap; don't go below 18)
+  const minSquadAfterSell = 18;
   for (const club of aiClubs) {
-    if (club.squad.length !== CONFIG.SQUAD_SIZE || market.length >= sellOnlyIfMarketBelow) continue;
     if (maxSells <= 0) continue;
-    const byOvr = club.squad.slice().sort((a, b) => (a.overall || 0) - (b.overall || 0));
-    const toSell = byOvr[0];
-    if (!toSell) continue;
-    const idx = club.squad.findIndex(p => p.id === toSell.id);
-    if (idx === -1) continue;
-    club.squad.splice(idx, 1);
-    club.budget += toSell.value;
-    market.push(toSell);
-    UL.game.transferMarket.history.push({
-      type: "OUT",
-      clubId: club.id,
-      clubName: club.name,
-      name: toSell.name,
-      value: toSell.value
-    });
+    for (let sells = 0; sells < maxSells; sells++) {
+      if (club.squad.length <= CONFIG.SQUAD_SIZE || club.squad.length <= minSquadAfterSell || market.length >= sellOnlyIfMarketBelow) break;
+      const byOvr = club.squad.slice().sort((a, b) => (a.overall || 0) - (b.overall || 0));
+      const toSell = byOvr[0];
+      if (!toSell) break;
+      const idx = club.squad.findIndex(p => p.id === toSell.id);
+      if (idx === -1) break;
+      club.squad.splice(idx, 1);
+      club.budget += toSell.value;
+      market.push(toSell);
+      UL.game.transferMarket.history.push({
+        type: "OUT",
+        clubId: club.id,
+        clubName: club.name,
+        name: toSell.name,
+        value: toSell.value
+      });
+    }
   }
 }
 
