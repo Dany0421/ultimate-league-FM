@@ -1563,8 +1563,12 @@ document.addEventListener("DOMContentLoaded", () => {
       const md = L.division1.currentMatchday;
       if (md % CONFIG.MARKET_REFRESH_INTERVAL === 0) {
         generateTransferMarket();
+        showNotification("⚡ Transfer Market Updated! You have one matchday to make your moves.");
+        if (document.getElementById("transferTableWrap")) renderTransferMarket();
+        if (document.getElementById("transferHistory")) renderTransferHistory();
+      }
+      if (md > 1 && (md - 1) % CONFIG.MARKET_REFRESH_INTERVAL === 0) {
         runAITransferWindow();
-        showNotification("⚡ Transfer Market Updated!");
         if (document.getElementById("transferTableWrap")) renderTransferMarket();
         if (document.getElementById("transferHistory")) renderTransferHistory();
       }
